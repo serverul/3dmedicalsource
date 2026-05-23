@@ -378,21 +378,21 @@ SEGMENTATION_PRESETS = {
     "long_bone": {
         "threshold_hu": 250,
         "threshold_max_hu": 3000,
-        "morphology_closing_radius": 2,
-        "morphology_opening_radius": 0,
+        "morphology_closing_radius": 3,
+        "morphology_opening_radius": 1,
         "fill_holes": True,
-        "min_island_volume_mm3": 500.0,
-        "smoothing_iterations": 2,
+        "min_island_volume_mm3": 1000.0,
+        "smoothing_iterations": 3,
         "decimation_target_faces": None,
     },
     "skull": {
         "threshold_hu": 200,
         "threshold_max_hu": 3000,
-        "morphology_closing_radius": 3,
-        "morphology_opening_radius": 1,
+        "morphology_closing_radius": 4,
+        "morphology_opening_radius": 2,
         "fill_holes": True,
-        "min_island_volume_mm3": 200.0,
-        "smoothing_iterations": 3,
+        "min_island_volume_mm3": 500.0,
+        "smoothing_iterations": 4,
         "decimation_target_faces": None,
     },
     "spine": {
@@ -400,8 +400,28 @@ SEGMENTATION_PRESETS = {
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 2,
         "morphology_opening_radius": 1,
+        "fill_holes": False,
+        "min_island_volume_mm3": 300.0,
+        "smoothing_iterations": 2,
+        "decimation_target_faces": None,
+    },
+    "pelvis": {
+        "threshold_hu": 250,
+        "threshold_max_hu": 3000,
+        "morphology_closing_radius": 3,
+        "morphology_opening_radius": 1,
         "fill_holes": True,
-        "min_island_volume_mm3": 100.0,
+        "min_island_volume_mm3": 800.0,
+        "smoothing_iterations": 3,
+        "decimation_target_faces": None,
+    },
+    "rib": {
+        "threshold_hu": 200,
+        "threshold_max_hu": 3000,
+        "morphology_closing_radius": 2,
+        "morphology_opening_radius": 2,
+        "fill_holes": False,
+        "min_island_volume_mm3": 200.0,
         "smoothing_iterations": 2,
         "decimation_target_faces": None,
     },
@@ -410,7 +430,7 @@ SEGMENTATION_PRESETS = {
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 1,
         "morphology_opening_radius": 0,
-        "fill_hu": True,
+        "fill_holes": True,
         "min_island_volume_mm3": 300.0,
         "smoothing_iterations": 1,
         "decimation_target_faces": None,
@@ -426,6 +446,220 @@ SEGMENTATION_PRESETS = {
         "decimation_target_faces": None,
     },
 }
+
+
+def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
+    """Automatically determine optimal HU threshold for bone segmentation.
+
+    Uses multi-peak histogram analysis inspired by Bonnet (arXiv 2601.22576):
+    - Detects air peak (~-1000 HU), soft tissue peak (~0-100 HU), and bone peak (~300-1000 HU)
+    - Finds the valley between soft tissue and bone peaks as the threshold
+    - Falls back to Otsu's method on the relevant range if valley detection fails
+    - Uses the 99.9th percentile of bone voxels as threshold_max, capped at 3500 HU
+    - Warns if less than 1% of voxels are bone-like
+
+    Returns (threshold_min, threshold_max, warnings).
+    """
+    warnings: list[str] = []
+    flat = vol.flatten().astype(np.float32)
+
+    # Focus on relevant HU range: -1100 to 4000
+    relevant = flat[(flat > -1100) & (flat < 4000)]
+    if len(relevant) == 0:
+        warnings.append("No voxels in relevant HU range; using defaults")
+        return 250.0, 3000.0, warnings
+
+    total_voxels = float(len(relevant))
+
+    # Build histogram with fine bins over the full range
+    hist, bin_edges = np.histogram(relevant, bins=512, range=(-1100, 4000))
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+
+    # Smooth histogram for robust peak/valley detection
+    from scipy.ndimage import uniform_filter1d
+    smoothed = uniform_filter1d(hist.astype(float), size=7)
+
+    # --- Detect peaks ---
+    # Air peak: maximum in range -1050..-800 HU
+    air_mask = (bin_centers >= -1050) & (bin_centers <= -800)
+    # Soft tissue peak: maximum in range -50..150 HU
+    st_mask = (bin_centers >= -50) & (bin_centers <= 150)
+    # Bone peak: maximum in range 200..1500 HU
+    bone_peak_mask = (bin_centers >= 200) & (bin_centers <= 1500)
+
+    air_peak_hu = -1000.0
+    if air_mask.any():
+        air_idx = np.argmax(smoothed[air_mask])
+        air_bins = bin_centers[air_mask]
+        air_peak_hu = float(air_bins[air_idx])
+
+    st_peak_hu = 50.0
+    if st_mask.any():
+        st_idx = np.argmax(smoothed[st_mask])
+        st_bins = bin_centers[st_mask]
+        st_peak_hu = float(st_bins[st_idx])
+
+    bone_peak_hu = 500.0
+    if bone_peak_mask.any():
+        bp_idx = np.argmax(smoothed[bone_peak_mask])
+        bp_bins = bin_centers[bone_peak_mask]
+        bone_peak_hu = float(bp_bins[bp_idx])
+
+    # --- Find valley between soft tissue and bone peaks ---
+    # Search range: from soft tissue peak + 50 to bone peak - 50, but at least 80..600
+    valley_lo = max(st_peak_hu + 50.0, 80.0)
+    valley_hi = min(bone_peak_hu - 50.0, 600.0)
+    if valley_lo >= valley_hi:
+        valley_lo = 80.0
+        valley_hi = 600.0
+
+    valley_search = (bin_centers >= valley_lo) & (bin_centers <= valley_hi)
+    threshold_min = 250.0  # default fallback
+
+    if valley_search.any():
+        search_hist = smoothed.copy()
+        search_hist[~valley_search] = np.inf
+        valley_idx = np.argmin(search_hist)
+        valley_val = float(bin_centers[valley_idx])
+        # Sanity check: valley should be between soft tissue and bone
+        if st_peak_hu < valley_val < bone_peak_hu:
+            threshold_min = valley_val
+        else:
+            # Valley not between peaks — fall through to Otsu
+            threshold_min = -1.0  # sentinel for Otsu fallback
+    else:
+        threshold_min = -1.0  # sentinel for Otsu fallback
+
+    # --- Otsu fallback ---
+    if threshold_min < 0:
+        try:
+            from skimage.filters import threshold_otsu
+            # Apply Otsu on the range 50..1500 HU (bone-relevant)
+            bone_relevant = relevant[(relevant > 50) & (relevant < 1500)]
+            if len(bone_relevant) > 100:
+                threshold_min = float(threshold_otsu(bone_relevant))
+                warnings.append(f"Valley detection failed; Otsu fallback threshold={threshold_min:.1f}")
+            else:
+                threshold_min = 250.0
+                warnings.append("Valley detection failed; Otsu skipped (too few voxels); using default 250")
+        except Exception:
+            threshold_min = 250.0
+            warnings.append("Valley detection and Otsu both failed; using default 250")
+
+    # Clamp to reasonable bone range
+    threshold_min = max(150.0, min(threshold_min, 500.0))
+
+    # --- threshold_max: 99.9th percentile of bone voxels, capped at 3500 HU ---
+    bone_voxels = relevant[relevant > threshold_min]
+    if len(bone_voxels) > 100:
+        threshold_max = float(np.percentile(bone_voxels, 99.9))
+        threshold_max = min(threshold_max, 3500.0)
+    else:
+        threshold_max = 3000.0
+
+    # --- Minimum bone voxel check ---
+    bone_pct = (len(bone_voxels) / total_voxels) * 100.0
+    if bone_pct < 1.0:
+        warnings.append(
+            f"Bone-like voxels are only {bone_pct:.2f}% of volume — "
+            f"threshold may be too high or scan may not contain bone"
+        )
+
+    return threshold_min, threshold_max, warnings
+
+
+def _validate_slice_quality(mask: np.ndarray, spacing: tuple[float, float, float],
+                             min_bone_fraction: float = 0.001) -> tuple[np.ndarray, int, int, list[str]]:
+    """Validate per-slice bone content and auto-crop Z range.
+
+    For each slice along axis 0 (Z), checks the fraction of bone pixels.
+    Slices with bone fraction < min_bone_fraction (default 0.1%) are considered
+    outside the bone region and cropped away.
+
+    Returns (cropped_mask, z_start, z_end, warnings).
+    """
+    warnings: list[str] = []
+    nz = mask.shape[0]
+    if nz < 3:
+        return mask, 0, nz, warnings
+
+    bone_fractions = np.zeros(nz, dtype=np.float64)
+    for z in range(nz):
+        sl = mask[z]
+        total = sl.shape[0] * sl.shape[1]
+        if total > 0:
+            bone_fractions[z] = np.count_nonzero(sl > 0.5) / total
+
+    # Find first and last slices with meaningful bone content
+    has_bone = bone_fractions >= min_bone_fraction
+    bone_indices = np.where(has_bone)[0]
+
+    if len(bone_indices) == 0:
+        # No slices pass quality check — return original with warning
+        warnings.append("No slices passed bone quality check; using full Z range")
+        return mask, 0, nz, warnings
+
+    z_start = int(bone_indices[0])
+    z_end = int(bone_indices[-1]) + 1  # exclusive
+
+    # Add small padding (up to 3 slices each side)
+    pad = 3
+    z_start = max(0, z_start - pad)
+    z_end = min(nz, z_end + pad)
+
+    cropped = mask[z_start:z_end].copy()
+    return cropped, z_start, z_end, warnings
+
+
+def _per_slice_opening(mask: np.ndarray, radius: int = 1) -> np.ndarray:
+    """Apply 2D binary opening to each slice independently to remove tiny noise."""
+    if radius <= 0:
+        return mask
+    from scipy.ndimage import binary_opening as bop
+    struct = np.ones((2 * radius + 1, 2 * radius + 1), dtype=np.uint8)
+    result = np.zeros_like(mask, dtype=np.float32)
+    for z in range(mask.shape[0]):
+        sl = mask[z]
+        if np.any(sl > 0.5):
+            opened = bop(sl > 0.5, structure=struct)
+            result[z] = opened.astype(np.float32)
+        else:
+            result[z] = sl
+    return result
+
+
+def _validate_mesh(mesh: trimesh.Trimesh, vol_shape: tuple, spacing: tuple) -> dict:
+    """Validate generated mesh quality and return diagnostic info."""
+    info = {
+        "faces": len(mesh.faces),
+        "is_watertight": bool(mesh.is_watertight),
+        "bounds_mm": mesh.bounds.tolist(),
+        "extents_mm": mesh.extents.tolist(),
+        "warnings": [],
+    }
+
+    # Check if mesh is too small relative to volume
+    vol_extent = max(
+        vol_shape[0] * spacing[0],
+        vol_shape[1] * spacing[1],
+        vol_shape[2] * spacing[2],
+    )
+    mesh_extent = max(mesh.extents) if len(mesh.vertices) > 0 else 0
+
+    if mesh_extent > 0 and vol_extent > 0:
+        ratio = mesh_extent / vol_extent
+        if ratio > 0.95:
+            info["warnings"].append("Mesh covers almost entire volume — threshold may be too low")
+        elif ratio < 0.05:
+            info["warnings"].append("Mesh is very small relative to volume — threshold may be too high")
+
+    if len(mesh.faces) < 100:
+        info["warnings"].append("Very few faces generated — check HU threshold")
+
+    if len(mesh.faces) > 500000:
+        info["warnings"].append("Very dense mesh — consider increasing step_size or decimation")
+
+    return info
 
 
 def _apply_morphology(mask: np.ndarray, closing_radius: int = 0, opening_radius: int = 0,
@@ -581,7 +815,7 @@ def dicom_to_bone_mesh(
     threshold_max_hu: Optional[float] = None,
     keep_largest: bool = True,
     smoothing_iterations: int = 2,
-    # --- Segmentation Engine v2 parameters ---
+    # --- Segmentation Engine v3 parameters ---
     morphology_closing_radius: int = 0,
     morphology_opening_radius: int = 0,
     dilation_radius: int = 0,
@@ -594,17 +828,27 @@ def dicom_to_bone_mesh(
     repair_mesh: bool = True,
     preset: Optional[str] = None,
     case_dir: Optional[Path] = None,
+    # --- v3 new ---
+    auto_threshold_enabled: bool = True,
+    per_slice_denoise: bool = True,
+    z_crop: bool = True,
 ) -> tuple[trimesh.Trimesh, dict]:
-    """Convert DICOM CT series to bone mesh with Segmentation Engine v2.
+    """Convert DICOM CT series to bone mesh with Segmentation Engine v3.
 
-    New v2 pipeline:
-      HU mask → ROI crop → morphology → remove small islands → keep largest
+    New v3 pipeline:
+      Load DICOM → auto-threshold (histogram + Otsu fallback)
+      → HU mask → per-slice denoise → Z crop to bone region
+      → 3D morphological closing → 3D morphological opening
+      → remove small islands → keep largest component
       → fill holes → marching cubes → smooth → decimate → repair → [PCA align]
     """
+    seg_warnings: list[str] = []
+
     # Apply preset defaults then override with explicit params
     if preset and preset.lower() in SEGMENTATION_PRESETS:
         preset_cfg = SEGMENTATION_PRESETS[preset.lower()]
-        threshold_hu = preset_cfg["threshold_hu"]
+        if auto_threshold_enabled and threshold_hu == 250.0:
+            threshold_hu = preset_cfg["threshold_hu"]  # will be overridden by auto
         if threshold_max_hu is None:
             threshold_max_hu = preset_cfg.get("threshold_max_hu")
         if morphology_closing_radius == 0:
@@ -624,52 +868,95 @@ def dicom_to_bone_mesh(
         active_preset = None
 
     vol, spacing, meta = load_dicom_series(dicom_dir, selected_series_uid=series_uid)
+    hu_min_actual = float(np.min(vol))
+    hu_max_actual = float(np.max(vol))
+
     # Cache volume as .npy for fast MPR slice access
     if case_dir is not None:
         npy_path = case_dir / "volume_cache.npy"
         if not npy_path.exists():
             np.save(str(npy_path), vol)
-    hu_min_actual = float(np.min(vol)); hu_max_actual = float(np.max(vol))
+
+    # --- Auto-threshold: adaptive HU threshold from histogram analysis ---
+    auto_info: dict = {}
+    if auto_threshold_enabled:
+        auto_tmin, auto_tmax, auto_warnings = _auto_threshold(vol)
+        # Only override if user didn't explicitly set a custom threshold
+        if threshold_hu == 250.0 or (preset and preset.lower() in SEGMENTATION_PRESETS):
+            threshold_hu = auto_tmin
+        if threshold_max_hu is None or threshold_max_hu == 3000.0:
+            threshold_max_hu = auto_tmax
+        seg_warnings.extend(auto_warnings)
+        auto_info = {
+            "auto_threshold_min": auto_tmin,
+            "auto_threshold_max": auto_tmax,
+            "auto_warnings": auto_warnings,
+        }
+
+    # Validate threshold against actual volume range
     if threshold_hu <= hu_min_actual or threshold_hu >= hu_max_actual:
-        raise ValueError(f"threshold {threshold_hu} outside volume HU range {meta['hu_min']}..{meta['hu_max']}")
+        raise ValueError(f"threshold {threshold_hu} outside volume HU range {hu_min_actual}..{hu_max_actual}")
+
+    # --- HU mask ---
     if threshold_max_hu is not None and threshold_max_hu > threshold_hu:
         mask = (vol >= threshold_hu) & (vol <= threshold_max_hu)
         src = mask.astype(np.float32)
     else:
-        src = None  # use raw HU for marching_cubes level
+        # Raw HU threshold mode (original behavior, no binary mask)
+        src = None
 
-    # --- ROI crop (on raw HU volume before threshold) ---
     crop_offset = (0, 0, 0)
-    if roi_crop and src is not None:
-        src, crop_offset, orig_shape = _roi_crop(src, spacing)
-        # Adjust spacing for cropped volume — marching_cubes uses cropped array
-        # We keep spacing as-is because voxel size hasn't changed, just the array bounds
+    z_crop_range = (0, vol.shape[0])
 
-    # --- Morphology ---
     if src is not None:
+        # --- Per-slice denoise: 2D opening on each slice to remove tiny noise ---
+        if per_slice_denoise and morphology_opening_radius > 0:
+            src = _per_slice_opening(src, radius=morphology_opening_radius)
+
+        # --- Z crop: auto-crop to slices containing bone ---
+        if z_crop:
+            src, z_start, z_end, z_warnings = _validate_slice_quality(src, spacing)
+            z_crop_range = (z_start, z_end)
+            seg_warnings.extend(z_warnings)
+
+        # --- ROI crop (bounding box around bone voxels) ---
+        if roi_crop:
+            src, crop_offset, orig_shape = _roi_crop(src, spacing)
+
+        # --- 3D Morphology: closing → opening ---
         src = _apply_morphology(
             src,
             closing_radius=morphology_closing_radius,
-            opening_radius=morphology_opening_radius,
+            opening_radius=morphology_opening_radius if not per_slice_denoise else 0,
             dilation_radius=dilation_radius,
             erosion_radius=erosion_radius,
             fill_holes=False,  # fill holes after island removal
         )
 
-    # --- Remove small islands ---
-    if src is not None and min_island_volume_mm3 > 0:
-        src = _remove_small_islands(src, spacing, min_volume_mm3=min_island_volume_mm3)
+        # --- Remove small islands ---
+        if min_island_volume_mm3 > 0:
+            src = _remove_small_islands(src, spacing, min_volume_mm3=min_island_volume_mm3)
 
-    # --- Keep largest connected component ---
-    if keep_largest and src is not None:
-        labels = measure.label(src > 0.5, connectivity=1)
-        if labels.max() > 0:
-            counts = np.bincount(labels.ravel()); counts[0] = 0
-            src = (labels == int(counts.argmax())).astype(np.float32)
+        # --- Keep largest connected component ---
+        if keep_largest:
+            labels = measure.label(src > 0.5, connectivity=1)
+            if labels.max() > 0:
+                counts = np.bincount(labels.ravel())
+                counts[0] = 0
+                largest_label = int(counts.argmax())
+                largest_size = counts[largest_label]
+                total_labeled = counts.sum()
+                # Only keep largest if it's a meaningful fraction (>30% of labeled voxels)
+                if total_labeled > 0 and largest_size / total_labeled > 0.3:
+                    src = (labels == largest_label).astype(np.float32)
+                else:
+                    seg_warnings.append(
+                        f"Largest component only {largest_size/total_labeled:.0%} of labeled voxels — keeping all"
+                    )
 
-    # --- Fill holes ---
-    if fill_holes and src is not None:
-        src = _apply_morphology(src, fill_holes=True)
+        # --- Fill holes ---
+        if fill_holes:
+            src = _apply_morphology(src, fill_holes=True)
 
     # --- Marching cubes ---
     if src is not None:
@@ -695,7 +982,11 @@ def dicom_to_bone_mesh(
 
     # Adjust for ROI crop offset in physical space
     if roi_crop and crop_offset != (0, 0, 0):
-        offset_phys = np.array([crop_offset[0] * spacing[0], crop_offset[1] * spacing[1], crop_offset[2] * spacing[2]])
+        offset_phys = np.array([
+            crop_offset[0] * spacing[0],
+            crop_offset[1] * spacing[1],
+            crop_offset[2] * spacing[2],
+        ])
         verts_xyz += offset_phys
 
     mesh = trimesh.Trimesh(vertices=verts_xyz, faces=faces, process=True)
@@ -738,15 +1029,19 @@ def dicom_to_bone_mesh(
         "min_island_volume_mm3": min_island_volume_mm3,
         "roi_crop": roi_crop,
         "roi_crop_offset_voxels": list(crop_offset),
+        "z_crop_range": list(z_crop_range),
         "pca_align": pca_align,
         "pca_transform": pca_transform.tolist() if pca_transform is not None else None,
         "decimation_target_faces": decimation_target_faces,
         "repair_mesh": repair_mesh,
         "active_preset": active_preset,
+        "auto_threshold": auto_info,
+        "per_slice_denoise": per_slice_denoise,
         "generated_vertices": int(len(mesh.vertices)),
         "generated_faces": int(len(mesh.faces)),
         "mesh_validation": manifold_report,
-        "warning": "Segmentation Engine v2. Needs manual validation for surgical use.",
+        "segmentation_warnings": seg_warnings,
+        "warning": "Segmentation Engine v3. Needs manual validation for surgical use.",
     })
     return mesh, meta
 
@@ -870,6 +1165,9 @@ def upload_dicom(
             repair_mesh=repair_mesh,
             preset=preset or None,
             case_dir=case_dir,
+            auto_threshold_enabled=True,
+            per_slice_denoise=True,
+            z_crop=True,
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
@@ -945,6 +1243,9 @@ def upload_dicom_folder(
             repair_mesh=repair_mesh,
             preset=preset or None,
             case_dir=case_dir,
+            auto_threshold_enabled=True,
+            per_slice_denoise=True,
+            z_crop=True,
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
@@ -1322,7 +1623,7 @@ def action_history(case_id: str):
     return mgr.history()
 
 
-def _push_undo(case_id: str, name: str, extra: dict | None = None):
+def _push_undo(case_id: str, name: str, extra: Optional[dict] = None):
     """Helper: push a snapshot-based undo action before a state-changing op."""
     mgr = get_manager(case_id)
     payload = {"name": name}
