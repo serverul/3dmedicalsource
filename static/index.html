@@ -1,19 +1,30 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3DMedicalPlanner MVP</title>
+  <title>3DMedicalPlanner</title>
   <style>
     :root{--bg:#080b12;--panel:#111827;--panel2:#0d1320;--line:#263247;--fg:#e8eefc;--muted:#92a2bd;--accent:#38bdf8;--ok:#22c55e;--bad:#ef4444;--warn:#f59e0b}
     *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,#18223b,#080b12 45%);color:var(--fg);font:14px/1.45 Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif}
     header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#070b13cc;backdrop-filter:blur(8px)}
-    h1{margin:0;font-size:22px}.sub{color:var(--muted);font-size:13px}.wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px;height:calc(100vh - 75px)}
-    .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;overflow:auto}.viewer{position:relative;min-height:500px;padding:0;overflow:hidden}.viewer canvas{display:block;width:100%;height:100%}
-    label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px} input,select{width:100%;padding:10px;border-radius:10px;background:#07101f;color:var(--fg);border:1px solid #2b3a55;outline:none} input:focus,select:focus{border-color:var(--accent)}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}button{width:100%;padding:11px 12px;border:0;border-radius:12px;background:var(--accent);color:#06101d;font-weight:800;cursor:pointer;margin-top:12px}button.secondary{background:#243653;color:#d9e7ff}button:disabled{opacity:.5;cursor:wait}
-    .drop{border:1px dashed #49617f;border-radius:14px;padding:14px;text-align:center;background:#07101f;color:var(--muted)}.drop input{border:0;background:transparent;padding:8px}.status{margin-top:12px;padding:10px;border-radius:12px;background:#07101f;border:1px solid var(--line)}.pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.ok{background:#12351f;color:#85efa5}.bad{background:#431b1b;color:#ff9b9b}.warn{background:#4a330d;color:#ffd17a}
-    pre{white-space:pre-wrap;word-break:break-word;background:#060c17;border:1px solid var(--line);border-radius:12px;padding:10px;color:#d9e7ff;max-height:260px;overflow:auto}.downloads{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}.downloads a{display:block;text-decoration:none;color:#c9e9ff;background:#14233a;border:1px solid #2e4568;padding:9px;border-radius:10px}.hint{font-size:12px;color:var(--muted);margin-top:8px}.toolbar{position:absolute;left:12px;top:12px;z-index:2;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--muted)}
+    h1{margin:0;font-size:22px}.sub{color:var(--muted);font-size:13px}
+    .wrap{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px;height:calc(100vh - 75px)}
+    .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;overflow:auto}
+    .viewer{position:relative;min-height:500px;padding:0;overflow:hidden}.viewer canvas{display:block;width:100%;height:100%}
+    label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px}
+    input,select{width:100%;padding:10px;border-radius:10px;background:#07101f;color:var(--fg);border:1px solid #2b3a55;outline:none}
+    input:focus,select:focus{border-color:var(--accent)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    button{width:100%;padding:11px 12px;border:0;border-radius:12px;background:var(--accent);color:#06101d;font-weight:800;cursor:pointer;margin-top:12px}
+    button.secondary{background:#243653;color:#d9e7ff}button:disabled{opacity:.5;cursor:wait}
+    .drop{border:1px dashed #49617f;border-radius:14px;padding:14px;text-align:center;background:#07101f;color:var(--muted)}.drop input{border:0;background:transparent;padding:8px}
+    .status{margin-top:12px;padding:10px;border-radius:12px;background:#07101f;border:1px solid var(--line)}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.ok{background:#12351f;color:#85efa5}.bad{background:#431b1b;color:#ff9b9b}.warn{background:#4a330d;color:#ffd17a}
+    pre{white-space:pre-wrap;word-break:break-word;background:#060c17;border:1px solid var(--line);border-radius:12px;padding:10px;color:#d9e7ff;max-height:260px;overflow:auto}
+    .downloads{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}.downloads a{display:block;text-decoration:none;color:#c9e9ff;background:#14233a;border:1px solid #2e4568;padding:9px;border-radius:10px}
+    .hint{font-size:12px;color:var(--muted);margin-top:8px}
+    .toolbar{position:absolute;left:12px;top:12px;z-index:2;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--muted)}
     .undo-bar{position:absolute;left:12px;top:12px;z-index:2;display:flex;gap:6px;align-items:center;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:6px 10px}
     .undo-btn{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--muted);padding:4px 10px;cursor:pointer;font-size:16px;font-weight:700;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px}
     .undo-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:#0d1a2e}
@@ -26,55 +37,62 @@
     .hist-name{color:#c9e7ff;font-weight:600}
     .hist-time{color:#6b7fa3;font-size:10px}
     .hist-empty{color:var(--muted);font-size:12px;text-align:center;padding:8px}
+    .mpr-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .mpr-canvas-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:1}
+    .mpr-canvas-wrap canvas{width:100%;height:100%;display:block}
+    .mpr-label{position:absolute;bottom:4px;left:4px;font-size:10px;color:var(--accent);background:#000000aa;padding:2px 6px;border-radius:4px}
+    .mpr-controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .mpr-controls input[type=range]{flex:1}
+    .mpr-controls span{font-size:11px;color:var(--muted);min-width:60px}
     @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}.viewer{height:60vh}}
   </style>
 </head>
 <body>
 <header>
-  <div><h1>🦴 3DMedicalPlanner MVP</h1><div class="sub">STL os → plane cut → fragment rotation/translation → STL export</div></div>
-  <div class="sub">research prototype · mm units</div>
+  <div><h1>🦴 3DMedicalPlanner</h1><div class="sub">3D CT-based surgical CAD · patient-specific planning</div></div>
+  <div class="sub">research prototype · mm units · v0.1</div>
 </header>
 <div class="wrap">
   <aside class="panel">
-    <h2>1. Import os / CT</h2>
+    <h2>1. Import</h2>
     <div class="drop">
       <input id="file" type="file" accept=".stl,.obj,.ply,.zip,.dcm" />
       <button onclick="uploadMesh()">Upload STL/OBJ/PLY</button>
-      <div class="hint">Pentru CT complet: selectează folderul cu toate slice-urile DICOM.</div>
+      <div class="hint">For full CT: select DICOM folder</div>
       <input id="folderInput" type="file" webkitdirectory directory multiple />
       <div class="row">
         <div><label>Bone threshold HU</label><input id="dicomThreshold" type="number" step="25" value="250"></div>
         <div><label>Step size</label><input id="dicomStep" type="number" step="1" value="1"></div>
       </div>
       <button onclick="uploadDicom()">Upload DICOM ZIP/.dcm → bone STL</button>
-      <button onclick="uploadDicomFolder()">Upload folder CT/DICOM → bone STL</button>
-      <button class="secondary" onclick="loadSample()">Încarcă os demo</button>
-      <button class="secondary" onclick="loadLatestCase()">Încarcă ultimul CT procesat</button>
+      <button onclick="uploadDicomFolder()">Upload DICOM folder → bone STL</button>
+      <button class="secondary" onclick="loadSample()">Load demo bone</button>
+      <button class="secondary" onclick="loadLatestCase()">Load latest case</button>
     </div>
-    <div id="uploadStatus" class="status"><span class="pill warn">idle</span> Aștept mesh.</div>
+    <div id="uploadStatus" class="status"><span class="pill warn">idle</span> Waiting for mesh.</div>
 
-    <h2>2. Segmentation workspace</h2>
-    <label>Preset anatomico</label>
+    <h2>2. Segmentation</h2>
+    <label>Anatomy preset</label>
     <select id="segPreset" onchange="applyPresetUI()">
-      <option value="">Personalizzato (nessun preset)</option>
-      <option value="long_bone">Osso lungo (femore, tibia, omero)</option>
-      <option value="skull">Cranio / Maxillo-facciale</option>
-      <option value="spine">Colonna vertebrale</option>
-      <option value="cortical">Osso corticale denso</option>
-      <option value="metal">Con artefatti metallici</option>
+      <option value="">Custom (no preset)</option>
+      <option value="long_bone">Long bone (femur, tibia, humerus)</option>
+      <option value="skull">Skull / Maxillofacial</option>
+      <option value="spine">Spine</option>
+      <option value="cortical">Dense cortical bone</option>
+      <option value="metal">With metal artifacts</option>
     </select>
-    <label>Serie DICOM</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
+    <label>DICOM Series</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
     <div class="row">
-      <div><label>HU min os</label><input id="segHuMin" type="number" step="25" value="250"></div>
+      <div><label>HU min bone</label><input id="segHuMin" type="number" step="25" value="250"></div>
       <div><label>HU max / metal cutoff</label><input id="segHuMax" type="number" step="100" value="3000"></div>
     </div>
     <div class="row3">
       <div><label>Step</label><input id="segStep" type="number" step="1" value="1"></div>
       <div><label>Smooth</label><input id="segSmooth" type="number" step="1" value="2"></div>
-      <div><label>Largest</label><select id="segLargest"><option value="true">Da</option><option value="false">Nu</option></select></div>
+      <div><label>Largest</label><select id="segLargest"><option value="true">Yes</option><option value="false">No</option></select></div>
     </div>
     <details>
-      <summary style="color:var(--muted);cursor:pointer;margin-top:10px;font-size:13px">⚙️ Segmentation Engine v2 — Morphology & Cleanup</summary>
+      <summary style="color:var(--muted);cursor:pointer;margin-top:10px;font-size:13px">⚙️ Segmentation v2 — Morphology & Cleanup</summary>
       <div class="row" style="margin-top:8px">
         <div><label>Closing radius</label><input id="segMorphClose" type="number" step="1" min="0" max="10" value="0"></div>
         <div><label>Opening radius</label><input id="segMorphOpen" type="number" step="1" min="0" max="10" value="0"></div>
@@ -88,67 +106,116 @@
         <div><label>Decimation faces (0=off)</label><input id="segDecimate" type="number" step="1000" min="0" value="0"></div>
       </div>
       <div class="row">
-        <div><label>Fill holes</label><select id="segFillHoles"><option value="true">Da</option><option value="false" selected>Nu</option></select></div>
-        <div><label>ROI crop</label><select id="segRoiCrop"><option value="true" selected>Da</option><option value="false">Nu</option></select></div>
+        <div><label>Fill holes</label><select id="segFillHoles"><option value="true">Yes</option><option value="false" selected>No</option></select></div>
+        <div><label>ROI crop</label><select id="segRoiCrop"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
       </div>
       <div class="row">
-        <div><label>PCA align</label><select id="segPca"><option value="false" selected>Nu</option><option value="true">Da</option></select></div>
-        <div><label>Repair mesh</label><select id="segRepair"><option value="true" selected>Da</option><option value="false">Nu</option></select></div>
+        <div><label>PCA align</label><select id="segPca"><option value="false" selected>No</option><option value="true">Yes</option></select></div>
+        <div><label>Repair mesh</label><select id="segRepair"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
       </div>
     </details>
     <button id="regenBtn" onclick="regenerateMesh()" disabled>Regenerate bone mesh</button>
-    <div id="segStatus" class="status"><span class="pill warn">idle</span> Segmentation neconfigurată.</div>
+    <div id="segStatus" class="status"><span class="pill warn">idle</span> Segmentation not configured.</div>
 
-    <h2>3. Tăiere + repoziționare</h2>
+    <h2>3. Osteotomy</h2>
     <div class="row">
-      <div><label>Axa planului de tăiere</label><select id="axis"><option value="z">Z</option><option value="y" selected>Y</option><option value="x">X</option></select></div>
-      <div><label>Offset plan mm</label><input id="offset" type="number" step="1" value="0"></div>
+      <div><label>Cut plane axis</label><select id="axis"><option value="z">Z</option><option value="y" selected>Y</option><option value="x">X</option></select></div>
+      <div><label>Offset mm</label><input id="offset" type="number" step="1" value="0"></div>
     </div>
     <div class="row">
-      <div><label>Fragment modificat</label><select id="side"><option value="positive">positive</option><option value="negative">negative</option></select></div>
-      <div><label>Axa rotație</label><select id="rotAxis"><option value="z">Z</option><option value="y">Y</option><option value="x" selected>X</option></select></div>
+      <div><label>Fragment to move</label><select id="side"><option value="positive">positive</option><option value="negative">negative</option></select></div>
+      <div><label>Rotation axis</label><select id="rotAxis"><option value="z">Z</option><option value="y">Y</option><option value="x" selected>X</option></select></div>
     </div>
-    <label>Rotație grade</label><input id="rotDeg" type="range" min="-60" max="60" step="1" value="15" oninput="rotVal.textContent=this.value+'°'"><div class="hint">Valoare: <b id="rotVal">15°</b></div>
+    <label>Rotation degrees</label><input id="rotDeg" type="range" min="-60" max="60" step="1" value="15" oninput="rotVal.textContent=this.value+'°'"><div class="hint">Value: <b id="rotVal">15°</b></div>
     <div class="row3"><div><label>Tx</label><input id="tx" type="number" step="1" value="0"></div><div><label>Ty</label><input id="ty" type="number" step="1" value="0"></div><div><label>Tz</label><input id="tz" type="number" step="1" value="0"></div></div>
-    <button id="cutBtn" onclick="runCut()" disabled>Taie / aplică transformare</button>
-    <div id="cutStatus" class="status"><span class="pill warn">idle</span> Fără plan aplicat.</div>
+    <button id="cutBtn" onclick="runCut()" disabled>Cut / apply transform</button>
+    <div id="cutStatus" class="status"><span class="pill warn">idle</span> No plan applied.</div>
     <div id="downloads" class="downloads"></div>
 
-    <h2>3. Cutting guide</h2>
+    <h2>4. Cutting Guide</h2>
     <div class="row">
-      <div><label>Lungime guide mm</label><input id="gLength" type="number" step="1" value="70"></div>
-      <div><label>Înălțime guide mm</label><input id="gHeight" type="number" step="1" value="22"></div>
+      <div><label>Length mm</label><input id="gLength" type="number" step="1" value="70"></div>
+      <div><label>Height mm</label><input id="gHeight" type="number" step="1" value="22"></div>
     </div>
     <div class="row">
-      <div><label>Grosime șină mm</label><input id="gRail" type="number" step="0.5" value="6"></div>
-      <div><label>Lățime slot ferăstrău mm</label><input id="gSlot" type="number" step="0.1" value="1.2"></div>
+      <div><label>Rail thickness mm</label><input id="gRail" type="number" step="0.5" value="6"></div>
+      <div><label>Saw slot width mm</label><input id="gSlot" type="number" step="0.1" value="1.2"></div>
     </div>
     <div class="row3">
       <div><label>Pin radius</label><input id="gPinR" type="number" step="0.1" value="1.6"></div>
       <div><label>Pin spacing</label><input id="gPinS" type="number" step="1" value="38"></div>
       <div><label>Sleeve outer</label><input id="gSleeve" type="number" step="0.1" value="3.2"></div>
     </div>
-    <button id="guideBtn" onclick="runGuide()" disabled>Generează cutting guide STL</button>
-    <div id="guideStatus" class="status"><span class="pill warn">idle</span> Fără guide.</div>
+    <button id="guideBtn" onclick="runGuide()" disabled>Generate cutting guide STL</button>
+    <div id="guideStatus" class="status"><span class="pill warn">idle</span> No guide.</div>
     <div id="guideDownloads" class="downloads"></div>
 
-    <h2>4. Conformal guide</h2>
+    <h2>5. Conformal Guide</h2>
     <div class="row">
       <div><label>Contact side</label><select id="cSide"><option value="positive">positive</option><option value="negative">negative</option></select></div>
       <div><label>Clearance mm</label><input id="cClear" type="number" step="0.1" value="0.6"></div>
     </div>
     <div class="row">
-      <div><label>Lungime pad mm</label><input id="cLength" type="number" step="1" value="70"></div>
-      <div><label>Înălțime pad mm</label><input id="cHeight" type="number" step="1" value="28"></div>
+      <div><label>Pad length mm</label><input id="cLength" type="number" step="1" value="70"></div>
+      <div><label>Pad height mm</label><input id="cHeight" type="number" step="1" value="28"></div>
     </div>
     <div class="row3">
-      <div><label>Grosime</label><input id="cThick" type="number" step="0.5" value="4"></div>
+      <div><label>Thickness</label><input id="cThick" type="number" step="0.5" value="4"></div>
       <div><label>Res U</label><input id="cResU" type="number" step="1" value="30"></div>
       <div><label>Res V</label><input id="cResV" type="number" step="1" value="16"></div>
     </div>
-    <button id="conformalBtn" onclick="runConformal()" disabled>Generează conformal guide STL</button>
-    <div id="conformalStatus" class="status"><span class="pill warn">idle</span> Fără conformal pad.</div>
+    <button id="conformalBtn" onclick="runConformal()" disabled>Generate conformal guide STL</button>
+    <div id="conformalStatus" class="status"><span class="pill warn">idle</span> No conformal pad.</div>
     <div id="conformalDownloads" class="downloads"></div>
+
+    <h2>6. Screw Trajectories</h2>
+    <div class="row3">
+      <div><label>Entry X</label><input id="sEntryX" type="number" step="0.5" value="0"></div>
+      <div><label>Entry Y</label><input id="sEntryY" type="number" step="0.5" value="0"></div>
+      <div><label>Entry Z</label><input id="sEntryZ" type="number" step="0.5" value="0"></div>
+    </div>
+    <div class="row3">
+      <div><label>Dir X</label><input id="sDirX" type="number" step="0.1" value="0"></div>
+      <div><label>Dir Y</label><input id="sDirY" type="number" step="0.1" value="0"></div>
+      <div><label>Dir Z</label><input id="sDirZ" type="number" step="0.1" value="1"></div>
+    </div>
+    <div class="row">
+      <div><label>Length mm</label><input id="sLen" type="number" step="1" value="30"></div>
+      <div><label>Diameter mm</label><input id="sDiam" type="number" step="0.1" value="3.5"></div>
+    </div>
+    <button class="secondary" onclick="addScrewTraj()">Add screw trajectory</button>
+    <div id="screwList" style="margin-top:8px;max-height:120px;overflow:auto"></div>
+    <button onclick="generateSleeves()">Generate drill sleeves STL</button>
+    <div id="screwStatus" class="status"><span class="pill warn">idle</span> No screws.</div>
+
+    <h2>7. Plate Generator</h2>
+    <div class="row">
+      <div><label>Width mm</label><input id="pWidth" type="number" step="0.5" value="12"></div>
+      <div><label>Thickness mm</label><input id="pThick" type="number" step="0.5" value="3"></div>
+    </div>
+    <div class="row">
+      <div><label>Screw hole Ø mm</label><input id="pHole" type="number" step="0.1" value="3.5"></div>
+      <div><label>Hole spacing mm</label><input id="pSpacing" type="number" step="1" value="15"></div>
+    </div>
+    <div class="hint">Click 3+ points on the mesh to define centerline, then generate.</div>
+    <button class="secondary" onclick="clearCenterline()">Clear centerline points</button>
+    <button onclick="generatePlate()">Generate patient-specific plate</button>
+    <div id="plateStatus" class="status"><span class="pill warn">idle</span> No plate.</div>
+    <div id="plateDownloads" class="downloads"></div>
+
+    <h2>8. Measurements</h2>
+    <div class="row3">
+      <div><label>P1 X</label><input id="mP1X" type="number" step="0.5" value="0"></div>
+      <div><label>P1 Y</label><input id="mP1Y" type="number" step="0.5" value="0"></div>
+      <div><label>P1 Z</label><input id="mP1Z" type="number" step="0.5" value="0"></div>
+    </div>
+    <div class="row3">
+      <div><label>P2 X</label><input id="mP2X" type="number" step="0.5" value="0"></div>
+      <div><label>P2 Y</label><input id="mP2Y" type="number" step="0.5" value="0"></div>
+      <div><label>P2 Z</label><input id="mP2Z" type="number" step="0.5" value="0"></div>
+    </div>
+    <button class="secondary" onclick="measureDistance()">Measure distance</button>
+    <div id="measureResult" class="status" style="margin-top:8px"><span class="pill warn">idle</span> No measurement.</div>
 
     <h2>Metadata</h2>
     <pre id="info">—</pre>
@@ -180,6 +247,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
 let caseId=null, scene, camera, renderer, controls, meshes=[];
+let centerlinePoints = [];
 const $=id=>document.getElementById(id);
 window.rotVal = $('rotVal');
 
@@ -199,7 +267,6 @@ function init(){
 function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}
 function clearMeshes(){meshes.forEach(m=>scene.remove(m));meshes=[]}
 function addPlaneHelper(axis,offset){
-  // remove old helpers by name
   [...scene.children].filter(o=>o.name==='cutPlane').forEach(o=>scene.remove(o));
   const geo=new THREE.PlaneGeometry(180,180); const mat=new THREE.MeshBasicMaterial({color:0x38bdf8,transparent:true,opacity:.18,side:THREE.DoubleSide}); const p=new THREE.Mesh(geo,mat); p.name='cutPlane';
   if(axis==='y'){p.rotation.x=Math.PI/2;p.position.y=offset}else if(axis==='x'){p.rotation.y=Math.PI/2;p.position.x=offset}else{p.position.z=offset}
@@ -211,13 +278,8 @@ function loadStl(url, color=0xd8e7ff, opacity=1){
       geo.computeVertexNormals();
       const mat=new THREE.MeshStandardMaterial({color,roughness:.62,metalness:.05,transparent:opacity<1,opacity,side:THREE.DoubleSide});
       const mesh=new THREE.Mesh(geo,mat); scene.add(mesh); meshes.push(mesh);
-      $('info').textContent = $('info').textContent === '—' ? `Loaded STL: ${geo.attributes.position.count} vertices` : $('info').textContent;
       fitCamera(); resolve(mesh);
-    }, undefined, err=>{
-      console.error('STL load failed', err);
-      setStatus('uploadStatus', false, 'STL generat, dar viewer-ul nu l-a putut încărca. Vezi consola/browser.');
-      reject(err);
-    });
+    }, undefined, err=>{ console.error('STL load failed', err); reject(err); });
   });
 }
 function fitCamera(){
@@ -225,7 +287,6 @@ function fitCamera(){
 }
 function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function setStatus(id, ok, msg){$(id).innerHTML=`<span class="pill ${ok?'ok':'bad'}">${ok?'OK':'FAIL'}</span> ${esc(msg)}`}
-
 function enableCadButtons(){ $('cutBtn').disabled=false; $('guideBtn').disabled=false; $('conformalBtn').disabled=false; $('regenBtn').disabled=false; }
 function populateSeries(meta){
   const sel=$('seriesSelect'); sel.innerHTML='<option value="">auto / largest series</option>';
@@ -249,18 +310,21 @@ function populateSeries(meta){
   const wtTag=wt!==undefined?` · WT=${wt}`:'';
   $('segStatus').innerHTML=`<span class="pill ok">series</span> ${meta?.slices||'?'} slices · HU ${Math.round(meta?.hu_min||0)}..${Math.round(meta?.hu_max||0)}${presetTag}${wtTag}`;
 }
+
+// -- Upload functions --
 window.uploadMesh=async()=>{
-  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Alege un STL/OBJ/PLY.'); return}
-  const fd=new FormData(); fd.append('file',f); $('uploadStatus').innerHTML='<span class="pill warn">upload</span> Procesez mesh...';
+  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Choose STL/OBJ/PLY.'); return}
+  const fd=new FormData(); fd.append('file',f);
   const r=await fetch('/api/upload',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('uploadStatus',false,j.detail||'upload failed');return}
-  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Mesh încărcat: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Mesh loaded: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  updateUndoUI();
 };
 window.uploadDicom=async()=>{
-  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Alege un ZIP DICOM sau .dcm.'); return}
+  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Choose DICOM ZIP or .dcm.'); return}
   const fd=new FormData();
   fd.append('file',f);
-  fd.append('threshold_hu',$('dicomThreshold').value || '250');
-  fd.append('step_size',$('dicomStep').value || '1');
+  fd.append('threshold_hu',$('dicomThreshold').value||'250');
+  fd.append('step_size',$('dicomStep').value||'1');
   fd.append('threshold_max_hu',$('segHuMax').value||'3000');
   fd.append('keep_largest',$('segLargest').value);
   fd.append('smoothing_iterations',$('segSmooth').value||'2');
@@ -275,22 +339,22 @@ window.uploadDicom=async()=>{
   fd.append('decimation_target_faces',$('segDecimate').value||'0');
   fd.append('repair_mesh',$('segRepair').value);
   fd.append('preset',$('segPreset').value||'');
-  $('uploadStatus').innerHTML='<span class="pill warn">dicom</span> Procesez DICOM → STL. Poate dura...';
   const r=await fetch('/api/upload-dicom',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM conversion failed');return}
   caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,'DICOM convertit în mesh os: '+caseId);
+  setStatus('uploadStatus',true,'DICOM converted: '+caseId);
   populateSeries(j.dicom);
   $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
   clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  updateUndoUI();
 };
 window.uploadDicomFolder=async()=>{
   const files=[...$('folderInput').files];
-  if(!files.length){setStatus('uploadStatus',false,'Alege folderul CT/DICOM întâi.'); return}
+  if(!files.length){setStatus('uploadStatus',false,'Choose DICOM folder first.'); return}
   const fd=new FormData();
   for(const f of files){ fd.append('files', f, f.webkitRelativePath || f.name); }
-  fd.append('threshold_hu',$('dicomThreshold').value || '250');
-  fd.append('step_size',$('dicomStep').value || '1');
+  fd.append('threshold_hu',$('dicomThreshold').value||'250');
+  fd.append('step_size',$('dicomStep').value||'1');
   fd.append('threshold_max_hu',$('segHuMax').value||'3000');
   fd.append('keep_largest',$('segLargest').value);
   fd.append('smoothing_iterations',$('segSmooth').value||'2');
@@ -305,29 +369,29 @@ window.uploadDicomFolder=async()=>{
   fd.append('decimation_target_faces',$('segDecimate').value||'0');
   fd.append('repair_mesh',$('segRepair').value);
   fd.append('preset',$('segPreset').value||'');
-  $('uploadStatus').innerHTML=`<span class="pill warn">folder</span> Procesez ${files.length} fișiere DICOM → STL. Poate dura...`;
   const r=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM folder conversion failed');return}
   caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,`Folder DICOM convertit: ${caseId} (${j.dicom.uploaded_files||files.length} fișiere)`);
+  setStatus('uploadStatus',true,`DICOM folder converted: ${caseId} (${j.dicom.uploaded_files||files.length} files)`);
   populateSeries(j.dicom);
   $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
   clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  updateUndoUI();
 };
 window.loadLatestCase=async()=>{
-  $('uploadStatus').innerHTML='<span class="pill warn">load</span> Caut ultimul CT procesat...';
   const r=await fetch('/api/recent-cases?limit=10'); const rows=await r.json();
-  const j=rows.find(x=>x.is_dicom) || rows[0];
-  if(!j){setStatus('uploadStatus',false,'Nu există caz procesat.'); return}
+  const j=rows.find(x=>x.is_dicom)||rows[0];
+  if(!j){setStatus('uploadStatus',false,'No processed case.'); return}
   caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,`Încărcat caz ${caseId} (${Math.round(j.size_bytes/1024)} KB STL)`);
+  setStatus('uploadStatus',true,`Loaded case ${caseId} (${Math.round(j.size_bytes/1024)} KB STL)`);
   if(j.dicom) populateSeries(j.dicom);
-  $('info').textContent=JSON.stringify({case_id:caseId,dicom:j.dicom},null,2);
   clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xf8fafc,1);
+  updateUndoUI();
 };
 window.loadSample=async()=>{
-  $('uploadStatus').innerHTML='<span class="pill warn">sample</span> Generez os demo...'; const r=await fetch('/api/sample',{method:'POST'}); const j=await r.json();
-  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Os demo încărcat: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  const r=await fetch('/api/sample',{method:'POST'}); const j=await r.json();
+  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Demo bone: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+  updateUndoUI();
 };
 window.applyPresetUI=()=>{
   const p=$('segPreset').value;
@@ -348,11 +412,9 @@ window.applyPresetUI=()=>{
   $('segMinIsland').value=c.min_island;
 };
 
-};
-
 window.regenerateMesh=async()=>{
-  if(!caseId){setStatus('segStatus',false,'Încarcă un CT întâi.'); return}
-  $('segStatus').innerHTML='<span class="pill warn">working</span> Regenerare mesh os...';
+  if(!caseId){setStatus('segStatus',false,'Load a CT first.'); return}
+  $('segStatus').innerHTML='<span class="pill warn">working</span> Regenerating mesh...';
   const fd=new FormData();
   fd.append('threshold_hu',$('segHuMin').value||'250');
   fd.append('threshold_max_hu',$('segHuMax').value||'3000');
@@ -360,7 +422,6 @@ window.regenerateMesh=async()=>{
   fd.append('series_uid',$('seriesSelect').value||'');
   fd.append('keep_largest',$('segLargest').value);
   fd.append('smoothing_iterations',$('segSmooth').value||'2');
-  // Segmentation Engine v2 params
   fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
   fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
   fd.append('dilation_radius',$('segDilate').value||'0');
@@ -376,142 +437,160 @@ window.regenerateMesh=async()=>{
   if(!r.ok){setStatus('segStatus',false,j.detail||'regenerate failed');return}
   populateSeries(j.dicom);
   const mv=j.dicom?.mesh_validation;
-  setStatus('segStatus',true,`Mesh: ${j.info.vertices}v/${j.info.faces}f${mv?', watertight='+mv.is_watertight:''}${j.dicom?.active_preset?', preset='+j.dicom.active_preset:''}`);
+  setStatus('segStatus',true,`Mesh: ${j.info.vertices}v/${j.info.faces}f${mv?', WT='+mv.is_watertight:''}${j.dicom?.active_preset?', preset='+j.dicom.active_preset:''}`);
   $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
   clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xd8e7ff,1);
+  updateUndoUI();
 };
 window.runCut=async()=>{
-  if(!caseId){setStatus('cutStatus',false,'Încarcă mesh întâi.'); return}
-  $('cutStatus').innerHTML='<span class="pill warn">working</span> Tai mesh-ul...'; $('downloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  if(!caseId){setStatus('cutStatus',false,'Load mesh first.'); return}
+  $('cutStatus').innerHTML='<span class="pill warn">working</span> Cutting...'; $('downloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
   const fd=new FormData();
   [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['rotate_side',$('side').value],['rotate_axis',$('rotAxis').value],['rotate_deg',$('rotDeg').value],['translate_x',$('tx').value],['translate_y',$('ty').value],['translate_z',$('tz').value]].forEach(([k,v])=>fd.append(k,v));
   const r=await fetch('/api/cut',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('cutStatus',false,j.detail||'cut failed');return}
-  setStatus('cutStatus',true,'Plan aplicat. Fragmente exportate.'); $('info').textContent=JSON.stringify(j,null,2);
+  setStatus('cutStatus',true,'Plan applied. Fragments exported.'); $('info').textContent=JSON.stringify(j,null,2);
   clearMeshes(); await loadStl(j.outputs.positive+'?t='+Date.now(),0x60a5fa,.92); await loadStl(j.outputs.negative+'?t='+Date.now(),0xf97316,.92);
-  $('downloads').innerHTML=`<a href="${j.outputs.positive}" download>Download fragment positive STL</a><a href="${j.outputs.negative}" download>Download fragment negative STL</a><a href="${j.outputs.combined}" download>Download combined repositioned STL</a><a href="${j.outputs.plan}" download>Download plan JSON</a>`;
+  $('downloads').innerHTML=`<a href="${j.outputs.positive}" download>Download positive STL</a><a href="${j.outputs.negative}" download>Download negative STL</a><a href="${j.outputs.combined}" download>Download combined STL</a><a href="${j.outputs.plan}" download>Download plan JSON</a>`;
+  updateUndoUI();
 };
 window.runGuide=async()=>{
-  if(!caseId){setStatus('guideStatus',false,'Încarcă mesh întâi.'); return}
-  $('guideStatus').innerHTML='<span class="pill warn">working</span> Generez guide STL...'; $('guideDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  if(!caseId){setStatus('guideStatus',false,'Load mesh first.'); return}
+  $('guideStatus').innerHTML='<span class="pill warn">working</span> Generating guide...'; $('guideDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
   const fd=new FormData();
-  [
-    ['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],
-    ['length_mm',$('gLength').value],['height_mm',$('gHeight').value],['rail_thickness_mm',$('gRail').value],['slot_width_mm',$('gSlot').value],
-    ['pin_radius_mm',$('gPinR').value],['pin_spacing_mm',$('gPinS').value],['pin_sleeve_outer_mm',$('gSleeve').value]
-  ].forEach(([k,v])=>fd.append(k,v));
+  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['length_mm',$('gLength').value],['height_mm',$('gHeight').value],['rail_thickness_mm',$('gRail').value],['slot_width_mm',$('gSlot').value],['pin_radius_mm',$('gPinR').value],['pin_spacing_mm',$('gPinS').value],['pin_sleeve_outer_mm',$('gSleeve').value]].forEach(([k,v])=>fd.append(k,v));
   const r=await fetch('/api/guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('guideStatus',false,j.detail||'guide failed');return}
-  setStatus('guideStatus',true,'Cutting guide generat.'); $('info').textContent=JSON.stringify(j,null,2);
+  setStatus('guideStatus',true,'Cutting guide generated.'); $('info').textContent=JSON.stringify(j,null,2);
   await loadStl(j.outputs.guide+'?t='+Date.now(),0x22c55e,.72);
   $('guideDownloads').innerHTML=`<a href="${j.outputs.guide}" download>Download cutting guide STL</a><a href="${j.outputs.guide_json}" download>Download guide JSON</a>`;
+  updateUndoUI();
 };
 window.runConformal=async()=>{
-  if(!caseId){setStatus('conformalStatus',false,'Încarcă mesh întâi.'); return}
-  $('conformalStatus').innerHTML='<span class="pill warn">working</span> Generez contact surface după os...'; $('conformalDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  if(!caseId){setStatus('conformalStatus',false,'Load mesh first.'); return}
+  $('conformalStatus').innerHTML='<span class="pill warn">working</span> Generating conformal guide...'; $('conformalDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
   const fd=new FormData();
-  [
-    ['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['contact_side',$('cSide').value],
-    ['length_mm',$('cLength').value],['height_mm',$('cHeight').value],['thickness_mm',$('cThick').value],['clearance_mm',$('cClear').value],
-    ['resolution_u',$('cResU').value],['resolution_v',$('cResV').value],['include_slot_rails','true']
-  ].forEach(([k,v])=>fd.append(k,v));
+  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['contact_side',$('cSide').value],['length_mm',$('cLength').value],['height_mm',$('cHeight').value],['thickness_mm',$('cThick').value],['clearance_mm',$('cClear').value],['resolution_u',$('cResU').value],['resolution_v',$('cResV').value],['include_slot_rails','true']].forEach(([k,v])=>fd.append(k,v));
   const r=await fetch('/api/conformal-guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('conformalStatus',false,j.detail||'conformal failed');return}
-  setStatus('conformalStatus',true,'Conformal guide generat.'); $('info').textContent=JSON.stringify(j,null,2);
+  setStatus('conformalStatus',true,'Conformal guide generated.'); $('info').textContent=JSON.stringify(j,null,2);
   await loadStl(j.outputs.combined+'?t='+Date.now(),0xa855f7,.70);
-  $('conformalDownloads').innerHTML=`<a href="${j.outputs.combined}" download>Download conformal cutting guide STL</a><a href="${j.outputs.pad}" download>Download contact pad STL</a><a href="${j.outputs.json}" download>Download conformal JSON</a>`;
+  $('conformalDownloads').innerHTML=`<a href="${j.outputs.combined}" download>Download conformal guide STL</a><a href="${j.outputs.pad}" download>Download contact pad STL</a><a href="${j.outputs.json}" download>Download JSON</a>`;
+  updateUndoUI();
 };
-$('axis').addEventListener('change',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
-$('offset').addEventListener('input',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
+
+// -- Screw Trajectories --
+window.addScrewTraj=async()=>{
+  if(!caseId){setStatus('screwStatus',false,'Load mesh first.'); return}
+  const fd=new FormData();
+  fd.append('entry_x',$('sEntryX').value); fd.append('entry_y',$('sEntryY').value); fd.append('entry_z',$('sEntryZ').value);
+  fd.append('dir_x',$('sDirX').value); fd.append('dir_y',$('sDirY').value); fd.append('dir_z',$('sDirZ').value);
+  fd.append('length_mm',$('sLen').value); fd.append('diameter_mm',$('sDiam').value);
+  const r=await fetch(`/api/cases/${caseId}/screw-trajectories`,{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('screwStatus',false,j.detail||'failed');return}
+  setStatus('screwStatus',true,`Added: ${j.trajectory.name}`);
+  refreshScrewList();
+  updateUndoUI();
+};
+async function refreshScrewList(){
+  if(!caseId) return;
+  const r=await fetch(`/api/cases/${caseId}/screw-trajectories`); const j=await r.json();
+  const list=$('screwList');
+  if(!j.trajectories?.length){ list.innerHTML='<div class="hint">No screws added</div>'; return; }
+  list.innerHTML=j.trajectories.map(t=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1a2538;font-size:12px"><span style="color:#c9e7ff">${t.name}</span><span style="color:#6b7fa3">${t.length_mm}mm Ø${t.diameter_mm}</span></div>`).join('');
+}
+window.generateSleeves=async()=>{
+  if(!caseId){setStatus('screwStatus',false,'Load mesh first.'); return}
+  const r=await fetch(`/api/cases/${caseId}/screw-trajectories/generate-sleeves`,{method:'POST'}); const j=await r.json();
+  if(!r.ok){setStatus('screwStatus',false,j.detail||'failed');return}
+  setStatus('screwStatus',true,`Generated ${j.count} sleeves`);
+  await loadStl(j.outputs?.screw_sleeves||`/api/cases/${caseId}/outputs/screw_sleeves.stl?t=${Date.now()}`,0xf59e0b,.7);
+  updateUndoUI();
+};
+
+// -- Plate Generator --
+window.clearCenterline=()=>{ centerlinePoints=[]; $('plateStatus').innerHTML='<span class="pill warn">idle</span> Points cleared.'; };
+window.generatePlate=async()=>{
+  if(!caseId){setStatus('plateStatus',false,'Load mesh first.'); return}
+  if(centerlinePoints.length<2){setStatus('plateStatus',false,'Need 2+ centerline points. Click on mesh.'); return}
+  const fd=new FormData();
+  fd.append('centerline_points',JSON.stringify(centerlinePoints));
+  fd.append('width_mm',$('pWidth').value);
+  fd.append('thickness_mm',$('pThick').value);
+  fd.append('screw_hole_diameter_mm',$('pHole').value);
+  fd.append('screw_hole_spacing_mm',$('pSpacing').value);
+  const r=await fetch('/api/plate-generator',{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('plateStatus',false,j.detail||'failed');return}
+  setStatus('plateStatus',true,`Plate: ${j.screw_holes} screw holes`);
+  $('plateDownloads').innerHTML=`<a href="${j.url}" download>Download plate STL</a>`;
+  await loadStl(j.url+'?t='+Date.now(),0x38bdf8,.8);
+  updateUndoUI();
+};
+
+// -- Measurements --
+window.measureDistance=async()=>{
+  if(!caseId){setStatus('measureResult',false,'Load mesh first.'); return}
+  const fd=new FormData();
+  fd.append('point_a',JSON.stringify([parseFloat($('mP1X').value),parseFloat($('mP1Y').value),parseFloat($('mP1Z').value)]));
+  fd.append('point_b',JSON.stringify([parseFloat($('mP2X').value),parseFloat($('mP2Y').value),parseFloat($('mP2Z').value)]));
+  const r=await fetch('/api/measure-distance',{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('measureResult',false,j.detail||'failed');return}
+  $('measureResult').innerHTML=`<span class="pill ok">result</span> Distance: <b>${j.distance_mm.toFixed(2)} mm</b>`;
+};
 
 // -- Undo/Redo --
 async function fetchHistory(){
   if(!caseId) return null;
-  try{
-    const r=await fetch(`/api/cases/${caseId}/history`);
-    if(!r.ok) return null;
-    return await r.json();
-  }catch{ return null; }
+  try{ const r=await fetch(`/api/cases/${caseId}/history`); if(!r.ok) return null; return await r.json(); }catch{ return null; }
 }
-
 async function updateUndoUI(){
   const h=await fetchHistory();
   const uBtn=$('undoBtn'), rBtn=$('redoBtn'), lbl=$('undoLabel');
   if(!h){ uBtn.disabled=true; rBtn.disabled=true; lbl.textContent=''; return; }
-  uBtn.disabled=!h.can_undo;
-  rBtn.disabled=!h.can_redo;
+  uBtn.disabled=!h.can_undo; rBtn.disabled=!h.can_redo;
   const uName=h.undo_stack?.length ? h.undo_stack[h.undo_stack.length-1].name : '';
   const rName=h.redo_stack?.length ? h.redo_stack[h.redo_stack.length-1].name : '';
-  let tip='';
-  if(uName) tip+=`Undo: ${uName}`;
-  if(rName) tip+=tip?` | Redo: ${rName}`:`Redo: ${rName}`;
+  let tip=''; if(uName) tip+=`Undo: ${uName}`; if(rName) tip+=tip?` | Redo: ${rName}`:`Redo: ${rName}`;
   lbl.textContent=tip;
 }
-
 async function doUndo(){
   if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
   const r=await fetch(`/api/cases/${caseId}/undo`,{method:'POST'});
   if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Undo failed'); return; }
-  const j=await r.json();
-  await updateUndoUI();
-  // Reload viewer to reflect restored state
-  clearMeshes();
+  await updateUndoUI(); clearMeshes();
   await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
-  // Also reload any output fragments if they exist
-  const posUrl=`/api/cases/${caseId}/outputs/fragment_positive.stl?t=${Date.now()}`;
-  const negUrl=`/api/cases/${caseId}/outputs/fragment_negative.stl?t=${Date.now()}`;
-  fetch(posUrl).then(r=>r.ok?loadStl(posUrl,0x60a5fa,.92):null).catch(()=>{});
-  fetch(negUrl).then(r=>r.ok?loadStl(negUrl,0xf97316,.92):null).catch(()=>{});
-  $('info').textContent=JSON.stringify({undone:j.undone,history:j.history},null,2);
 }
-
 async function doRedo(){
   if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
   const r=await fetch(`/api/cases/${caseId}/redo`,{method:'POST'});
   if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Redo failed'); return; }
-  const j=await r.json();
-  await updateUndoUI();
-  clearMeshes();
+  await updateUndoUI(); clearMeshes();
   await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
-  const posUrl=`/api/cases/${caseId}/outputs/fragment_positive.stl?t=${Date.now()}`;
-  const negUrl=`/api/cases/${caseId}/outputs/fragment_negative.stl?t=${Date.now()}`;
-  fetch(posUrl).then(r=>r.ok?loadStl(posUrl,0x60a5fa,.92):null).catch(()=>{});
-  fetch(negUrl).then(r=>r.ok?loadStl(negUrl,0xf97316,.92):null).catch(()=>{});
-  $('info').textContent=JSON.stringify({redone:j.redone,history:j.history},null,2);
 }
-
 async function toggleHistory(){
   const panel=$('historyPanel');
   if(panel.classList.contains('open')){ panel.classList.remove('open'); return; }
   const h=await fetchHistory();
-  if(!h){ panel.innerHTML='<div class="hist-empty">No history available</div>'; panel.classList.add('open'); return; }
+  if(!h){ panel.innerHTML='<div class="hist-empty">No history</div>'; panel.classList.add('open'); return; }
   let html='';
   const fmtTs=t=>{ if(!t) return ''; const d=new Date(t*1000); return d.toLocaleTimeString(); };
   if(h.undo_stack?.length){
     html+='<div style="color:var(--accent);font-size:11px;font-weight:700;margin-bottom:4px">Undo stack</div>';
-    for(const a of [...h.undo_stack].reverse()){
-      html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
-    }
+    for(const a of [...h.undo_stack].reverse()) html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
   }
   if(h.redo_stack?.length){
     html+='<div style="color:var(--warn);font-size:11px;font-weight:700;margin:6px 0 4px">Redo stack</div>';
-    for(const a of [...h.redo_stack].reverse()){
-      html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
-    }
+    for(const a of [...h.redo_stack].reverse()) html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
   }
-  if(!html) html='<div class="hist-empty">No actions recorded yet</div>';
-  panel.innerHTML=html;
-  panel.classList.add('open');
+  if(!html) html='<div class="hist-empty">No actions yet</div>';
+  panel.innerHTML=html; panel.classList.add('open');
 }
 
-// Keyboard shortcuts
+// -- Keyboard shortcuts --
 document.addEventListener('keydown',e=>{
   if(e.ctrlKey && e.key==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); }
   if(e.ctrlKey && e.key==='z' && e.shiftKey){ e.preventDefault(); doRedo(); }
-  if(e.ctrlKey && e.key==='y'){ e.preventDefault(); doRedo(); }
 });
 
-// Refresh undo UI whenever caseId changes
-const _origEnableCad=enableCadButtons;
-function enableCadButtons(){ _origEnableCad(); updateUndoUI(); }
-
+$('axis').addEventListener('change',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
+$('offset').addEventListener('input',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
 init();
 </script>
 </body>
