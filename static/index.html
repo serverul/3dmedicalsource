@@ -682,7 +682,6 @@ window.toggleVis = toggleVis;
 //  UPLOAD
 // ============================================================
 window.uploadDicom = async function() {
-  console.log('[upload] uploadDicom called');
   const input = document.getElementById('dicom-input');
   if (!input.files.length) { alert('Select a DICOM folder'); return; }
   const loading = document.getElementById('loading');
@@ -691,71 +690,51 @@ window.uploadDicom = async function() {
 
   const splitBones = document.getElementById('split-bones').checked;
   const fileCount = input.files.length;
+  progress.textContent = `Uploading ${fileCount} DICOM files...`;
+  console.log('[upload] Starting upload of', fileCount, 'files');
+
+  const fd = new FormData();
+  let added = 0;
+  for (const f of input.files) {
+    fd.append('files', f, f.webkitRelativePath || f.name);
+    added++;
+  }
+  fd.append('split_bones', splitBones ? 'true' : 'false');
+  fd.append('sensitivity', 'high');
 
   try {
-    // ZIP the files in the browser first (much faster upload)
-    progress.textContent = `Zipping ${fileCount} DICOM files...`;
-    console.log('[upload] zipping', fileCount, 'files');
-
-    const {default: JSZip} = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-    const zip = new JSZip();
-    let added = 0;
-    for (const f of input.files) {
-      const relPath = f.webkitRelativePath || f.name;
-      // Skip hidden files and non-DICOM
-      const name = f.name.toLowerCase();
-      if (name.startsWith('.')) continue;
-      zip.file(relPath, f);
-      added++;
-      if (added % 50 === 0) progress.textContent = `Zipping: ${added}/${fileCount} files...`;
+    progress.textContent = 'Segmenting bones (30-120s)...';
+    console.log('[upload] Sending to /api/upload-dicom-folder...');
+    const resp = await fetch('/api/upload-dicom-folder', {method: 'POST', body: fd});
+    console.log('[upload] Response status:', resp.status);
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({detail: resp.statusText}));
+      throw new Error(e.detail || 'Upload failed: ' + resp.status);
     }
-
-    progress.textContent = 'Compressing ZIP...';
-    const blob = await zip.generateAsync({type: 'blob', compression: 'STORE'}, (meta) => {
-      progress.textContent = `Compressing: ${meta.percent.toFixed(0)}%`;
-    });
-
-    console.log('[upload] ZIP size:', (blob.size / 1024 / 1024).toFixed(1), 'MB');
-    progress.textContent = `Uploading ${(blob.size / 1024 / 1024).toFixed(0)} MB...`;
-
-    const fd = new FormData();
-    fd.append('file', blob, 'dicom_upload.zip');
-    fd.append('split_bones', splitBones ? 'true' : 'false');
-    fd.append('sensitivity', 'high');
-
-    console.log('[upload] sending to /api/upload-dicom...');
-    const resp = await fetch('/api/upload-dicom', {method:'POST', body:fd});
-    if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail||'Upload failed'); }
     const data = await resp.json();
-    console.log('[upload] response:', data);
+    console.log('[upload] Success:', data);
 
     caseId = data.case_id;
     progress.textContent = `Loading ${data.bone_count} bone(s)...`;
 
-    // Clear old
     gizmo.detach();
     objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
     objects = []; selectedIdx = -1;
 
-    // Load bones from server URLs
     for (let i = 0; i < data.bone_count; i++) {
       progress.textContent = `Loading bone ${i+1}/${data.bone_count}...`;
       const url = `/api/cases/${caseId}/bone/${i}.stl`;
-
-      // Use THREE.STLLoader
       const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
       const loader = new STLLoader();
       const geo = await new Promise((resolve, reject) => {
         loader.load(url, resolve, undefined, reject);
       });
       geo.computeVertexNormals();
-
       const color = COLORS[i % COLORS.length];
-      const mat = new THREE.MeshStandardMaterial({color, roughness:0.55, metalness:0.05, side:THREE.DoubleSide});
+      const mat = new THREE.MeshStandardMaterial({color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = `bone_${i}`;
       scene.add(mesh);
-
       objects.push({
         mesh, name: data.bones[i]?.name || `Bone ${i+1}`, color,
         origPos: mesh.position.clone(), visible: true, transparent: false,
