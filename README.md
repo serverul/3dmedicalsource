@@ -35,7 +35,7 @@ Working local web app:
 ```bash
 python3 -m venv venv
 ./venv/bin/python -m pip install -r requirements.txt
-./venv/bin/uvicorn app:app --host 0.0.0.0 --port 8121
+./venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8121
 ```
 
 Open:

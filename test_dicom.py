@@ -33,6 +33,9 @@ for z in range(slices):
     ds.RescaleIntercept=0; ds.RescaleSlope=1
     ds.PixelData=arr.tobytes()
     ds.save_as(base/f'slice_{z:03d}.dcm')
-mesh, meta = dicom_to_bone_mesh(base, threshold_hu=250, step_size=1)
+mesh, meta = dicom_to_bone_mesh(base, threshold_hu=250, step_size=1,
+                                morph_closing_radius=2, fill_holes_3d=True,
+                                remove_small_islands_mm3=100, auto_crop=True)
 print(len(mesh.vertices), len(mesh.faces), mesh.is_watertight, meta['slices'], meta['spacing_mm'])
+print("v2:", meta.get('segmentation_v2', {}).get('morph_closing_radius'))
 assert len(mesh.vertices) > 0 and len(mesh.faces) > 0

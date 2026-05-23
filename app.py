@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pydicom
 import trimesh
+from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 from skimage import measure
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -367,6 +368,252 @@ def load_dicom_series(dicom_dir: Path, selected_series_uid: str | None = None) -
     return vol, (slice_spacing, float(ps[0]), float(ps[1])), meta
 
 
+# ── Segmentation Engine v2 ──────────────────────────────────────────────────
+
+SEGMENTATION_PRESETS = {
+    "long_bone": {
+        "label": "Os lung (femur, tibia, humerus)",
+        "hu_min": 250, "hu_max": 1800,
+        "morph_closing": 3, "morph_opening": 1,
+        "fill_holes_2d": True, "fill_holes_3d": True,
+        "remove_small_islands_mm3": 200,
+        "auto_crop": True, "align_axis": "long",
+        "mesh_hole_fill": True, "mesh_repair": True,
+        "smoothing": 3,
+    },
+    "skull": {
+        "label": "Craniu / maxilofacial",
+        "hu_min": 300, "hu_max": 3000,
+        "morph_closing": 2, "morph_opening": 1,
+        "fill_holes_2d": True, "fill_holes_3d": False,
+        "remove_small_islands_mm3": 100,
+        "auto_crop": True, "align_axis": "",
+        "mesh_hole_fill": True, "mesh_repair": True,
+        "smoothing": 2,
+    },
+    "spine": {
+        "label": "Coloană / vertebre",
+        "hu_min": 200, "hu_max": 1600,
+        "morph_closing": 2, "morph_opening": 1,
+        "fill_holes_2d": True, "fill_holes_3d": False,
+        "remove_small_islands_mm3": 50,
+        "auto_crop": True, "align_axis": "long",
+        "mesh_hole_fill": True, "mesh_repair": True,
+        "smoothing": 2,
+    },
+    "cortical": {
+        "label": "Os cortical (HIGH density)",
+        "hu_min": 600, "hu_max": 2000,
+        "morph_closing": 1, "morph_opening": 1,
+        "fill_holes_2d": False, "fill_holes_3d": False,
+        "remove_small_islands_mm3": 50,
+        "auto_crop": True, "align_axis": "",
+        "mesh_hole_fill": False, "mesh_repair": False,
+        "smoothing": 1,
+    },
+    "metal": {
+        "label": "Metal artifact (implant, screw)",
+        "hu_min": 2000, "hu_max": 10000,
+        "morph_closing": 4, "morph_opening": 2,
+        "fill_holes_2d": True, "fill_holes_3d": True,
+        "remove_small_islands_mm3": 50,
+        "auto_crop": True, "align_axis": "",
+        "mesh_hole_fill": True, "mesh_repair": True,
+        "smoothing": 2,
+    },
+}
+
+
+def ball_3d(radius: int) -> np.ndarray:
+    """Generate a 3D spherical structuring element of given radius."""
+    if radius <= 0:
+        return np.ones((1, 1, 1), dtype=bool)
+    d = 2 * radius + 1
+    center = np.array([radius, radius, radius])
+    grid = np.indices((d, d, d)) - center.reshape(3, 1, 1, 1)
+    dist = np.sqrt(grid[0]**2 + grid[1]**2 + grid[2]**2)
+    return dist <= radius
+
+
+def apply_morphology(mask: np.ndarray, closing_radius: int = 0, opening_radius: int = 0) -> np.ndarray:
+    """Apply binary closing and/or opening to a 3D boolean mask."""
+    if closing_radius > 0:
+        struct = ball_3d(closing_radius)
+        mask = ndi.binary_closing(mask, structure=struct)
+    if opening_radius > 0:
+        struct = ball_3d(opening_radius)
+        mask = ndi.binary_opening(mask, structure=struct)
+    return mask
+
+
+def fill_holes_2d_slices(mask: np.ndarray) -> np.ndarray:
+    """Fill holes in each 2D slice independently (z-axis)."""
+    out = mask.copy()
+    for z in range(mask.shape[0]):
+        out[z] = ndi.binary_fill_holes(out[z])
+    return out
+
+
+def fill_holes_3d_volume(mask: np.ndarray) -> np.ndarray:
+    """Fill holes in 3D (background cavities fully enclosed by foreground)."""
+    return ndi.binary_fill_holes(mask)
+
+
+def remove_small_islands(mask: np.ndarray, min_voxels: int = 0, min_volume_mm3: float = 0, voxel_volume_mm3: float = 1.0) -> np.ndarray:
+    """Remove connected components smaller than a threshold."""
+    if min_voxels <= 0 and min_volume_mm3 <= 0:
+        return mask
+    labels, num = ndi.label(mask)
+    if num <= 1:
+        return mask
+    counts = np.bincount(labels.ravel())
+    threshold_voxels = max(min_voxels, int(min_volume_mm3 / max(voxel_volume_mm3, 0.001)))
+    keep_labels = {i for i, c in enumerate(counts) if i > 0 and c >= threshold_voxels}
+    if not keep_labels:
+        # Keep the largest by default
+        counts[0] = 0
+        keep_labels = {int(counts.argmax())}
+    return np.isin(labels, list(keep_labels))
+
+
+def crop_to_bbox(mask: np.ndarray, margin_voxels: int = 5) -> tuple[np.ndarray, tuple[slice, ...]]:
+    """Crop volume to bounding box of foreground voxels + margin."""
+    coords = np.array(np.nonzero(mask))
+    if coords.size == 0:
+        return mask, (slice(None),) * mask.ndim
+    mins = coords.min(axis=1) - margin_voxels
+    maxs = coords.max(axis=1) + margin_voxels + 1
+    slices = tuple(slice(max(0, int(m)), int(M)) for m, M in zip(mins, maxs))
+    return mask[tuple(slices)], slices
+
+
+def align_to_axis(mask: np.ndarray, target_axis: str = "long", spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+                  ) -> tuple[np.ndarray, dict]:
+    """Compute PCA alignment of bone voxels. Returns rotation info for mesh stage.
+    
+    We don't rotate the volume (too expensive/interpolated). Instead we return
+    PCA basis vectors so the mesh can be transformed after marching cubes.
+    """
+    coords = np.array(np.nonzero(mask)).T.astype(np.float64)  # Nx3 in voxel space
+    if len(coords) < 10:
+        return mask, {"aligned": False, "reason": "too few voxels"}
+    # Scale to physical space
+    coords[:, 0] *= spacing[0]  # z
+    coords[:, 1] *= spacing[1]  # y
+    coords[:, 2] *= spacing[2]  # x
+    
+    centroid = coords.mean(axis=0)
+    centered = coords - centroid
+    cov = centered.T @ centered / len(coords)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    # Sort descending by eigenvalue (longest axis first)
+    order = np.argsort(eigvals)[::-1]
+    eigvecs = eigvecs[:, order]
+    # Ensure right-handed coordinate system
+    if np.linalg.det(eigvecs) < 0:
+        eigvecs[:, -1] *= -1
+    
+    # Map target_axis to index
+    target_idx = {"z": 0, "y": 1, "x": 2, "long": 0}.get(target_axis, 0)
+    # We want the primary PCA axis to align to the target physical axis.
+    # target_vec is e.g. [0,0,1] for x (CAD x = dicom col axis)
+    if target_axis == "long":
+        # Align primary PCA axis to CAD x-axis (highest variance)
+        target_vec = np.array([0.0, 0.0, 1.0])
+    elif target_axis == "x":
+        target_vec = np.array([0.0, 0.0, 1.0])
+    elif target_axis == "y":
+        target_vec = np.array([0.0, 1.0, 0.0])
+    elif target_axis == "z":
+        target_vec = np.array([1.0, 0.0, 0.0])
+    else:
+        return mask, {"aligned": False, "reason": f"unknown target axis {target_axis}"}
+    
+    primary = eigvecs[:, 0]
+    # Compute rotation that aligns primary to target_vec (rotation between two vectors)
+    v = np.cross(primary, target_vec)
+    s = np.linalg.norm(v)
+    c = np.dot(primary, target_vec)
+    if s < 1e-6:
+        R = np.eye(3)
+    else:
+        vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+        R = np.eye(3) + vx + vx @ vx * ((1 - c) / (s * s))
+    
+    # Build 4x4 transform: rotate centroid-centered mesh, then translate back
+    transform = np.eye(4)
+    transform[:3, :3] = R
+    transform[:3, 3] = centroid - R @ centroid
+    
+    return mask, {
+        "aligned": True,
+        "target_axis": target_axis,
+        "pca_primary": primary.tolist(),
+        "pca_centroid": centroid.tolist(),
+        "rotation_matrix": R.tolist(),
+        "transform_4x4": transform.tolist(),
+    }
+
+
+def repair_mesh(mesh: trimesh.Trimesh, fill_holes: bool = False, fix_normals: bool = False,
+                decimation_factor: float = 0.0) -> trimesh.Trimesh:
+    """Apply mesh-level cleanup operations."""
+    if fix_normals and not mesh.is_watertight:
+        try:
+            trimesh.repair.fix_normals(mesh)
+        except Exception:
+            pass
+    if fill_holes:
+        try:
+            trimesh.repair.fill_holes(mesh)
+        except Exception:
+            pass
+    if decimation_factor > 0 and decimation_factor < 1:
+        try:
+            target = max(12, int(len(mesh.faces) * (1 - decimation_factor)))
+            mesh = mesh.simplify_quadric_decimation(target)
+        except Exception:
+            pass
+    return mesh
+
+
+def resolve_preset(preset_name: str, overrides: dict) -> dict:
+    """Merge preset defaults with user overrides."""
+    preset = SEGMENTATION_PRESETS.get(preset_name, {})
+    params = {
+        "threshold_hu": 250.0,
+        "threshold_max_hu": None,
+        "morph_closing_radius": 0,
+        "morph_opening_radius": 0,
+        "fill_holes_2d": False,
+        "fill_holes_3d": False,
+        "remove_small_islands_mm3": 0,
+        "auto_crop": True,
+        "align_axis": "",
+        "mesh_hole_fill": False,
+        "mesh_repair_normals": False,
+        "smoothing_iterations": 2,
+        "decimation_factor": 0.0,
+    }
+    # Apply preset
+    if preset:
+        params["threshold_hu"] = preset.get("hu_min", params["threshold_hu"])
+        params["threshold_max_hu"] = preset.get("hu_max")
+        params["morph_closing_radius"] = preset.get("morph_closing", 0)
+        params["morph_opening_radius"] = preset.get("morph_opening", 0)
+        params["fill_holes_2d"] = preset.get("fill_holes_2d", False)
+        params["fill_holes_3d"] = preset.get("fill_holes_3d", False)
+        params["remove_small_islands_mm3"] = preset.get("remove_small_islands_mm3", 0)
+        params["auto_crop"] = preset.get("auto_crop", True)
+        params["align_axis"] = preset.get("align_axis", "")
+        params["mesh_hole_fill"] = preset.get("mesh_hole_fill", False)
+        params["mesh_repair_normals"] = preset.get("mesh_repair", False)
+        params["smoothing_iterations"] = preset.get("smoothing", 2)
+    # User overrides win
+    params.update(overrides)
+    return params
+
+
 def dicom_to_bone_mesh(
     dicom_dir: Path,
     threshold_hu: float = 250.0,
@@ -375,26 +622,99 @@ def dicom_to_bone_mesh(
     threshold_max_hu: float | None = None,
     keep_largest: bool = True,
     smoothing_iterations: int = 2,
+    # v2 segmentation params
+    preset: str = "",
+    morph_closing_radius: int = 0,
+    morph_opening_radius: int = 0,
+    fill_holes_2d: bool = False,
+    fill_holes_3d: bool = False,
+    remove_small_islands_mm3: float = 0.0,
+    auto_crop: bool = True,
+    align_axis: str = "",
+    mesh_hole_fill: bool = False,
+    mesh_repair_normals: bool = False,
+    decimation_factor: float = 0.0,
 ) -> tuple[trimesh.Trimesh, dict]:
     vol, spacing, meta = load_dicom_series(dicom_dir, selected_series_uid=series_uid)
     hu_min_actual = float(np.min(vol)); hu_max_actual = float(np.max(vol))
+    
+    # Resolve preset if given
+    if preset:
+        preset_params = resolve_preset(preset, {
+            "threshold_hu": threshold_hu,
+            "threshold_max_hu": threshold_max_hu,
+            "smoothing_iterations": smoothing_iterations,
+        })
+        threshold_hu = preset_params["threshold_hu"]
+        threshold_max_hu = preset_params["threshold_max_hu"]
+        morph_closing_radius = preset_params["morph_closing_radius"]
+        morph_opening_radius = preset_params["morph_opening_radius"]
+        fill_holes_2d = preset_params["fill_holes_2d"]
+        fill_holes_3d = preset_params["fill_holes_3d"]
+        remove_small_islands_mm3 = preset_params["remove_small_islands_mm3"]
+        auto_crop = preset_params["auto_crop"]
+        align_axis = preset_params["align_axis"]
+        mesh_hole_fill = preset_params["mesh_hole_fill"]
+        mesh_repair_normals = preset_params["mesh_repair_normals"]
+        smoothing_iterations = preset_params["smoothing_iterations"]
+        decimation_factor = preset_params["decimation_factor"]
+    
     if threshold_hu <= hu_min_actual or threshold_hu >= hu_max_actual:
         raise ValueError(f"threshold {threshold_hu} outside volume HU range {meta['hu_min']}..{meta['hu_max']}")
+    
+    # ── Step 1: HU threshold → binary mask ──
     if threshold_max_hu is not None and threshold_max_hu > threshold_hu:
         mask = (vol >= threshold_hu) & (vol <= threshold_max_hu)
-        level = 0.5
-        src = mask.astype(np.float32)
     else:
-        src = vol
-        level = threshold_hu
-    if keep_largest and src.dtype == np.float32 and set(np.unique(src[:1]).tolist()).issubset({0.0, 1.0}):
-        labels = measure.label(src > 0.5, connectivity=1)
-        if labels.max() > 0:
-            counts = np.bincount(labels.ravel()); counts[0] = 0
-            src = (labels == int(counts.argmax())).astype(np.float32)
+        mask = vol >= threshold_hu
+    
+    # ── Step 2: Morphology ──
+    if morph_closing_radius > 0 or morph_opening_radius > 0:
+        mask = apply_morphology(mask, closing_radius=morph_closing_radius, opening_radius=morph_opening_radius)
+    
+    # ── Step 3: Fill holes ──
+    if fill_holes_2d:
+        mask = fill_holes_2d_slices(mask)
+    if fill_holes_3d:
+        mask = fill_holes_3d_volume(mask)
+    
+    # ── Step 4: Remove small islands ──
+    voxel_volume = spacing[0] * spacing[1] * spacing[2]
+    if remove_small_islands_mm3 > 0 or keep_largest:
+        min_voxels = max(int(remove_small_islands_mm3 / max(voxel_volume, 0.001)), 0)
+        if keep_largest:
+            labels, num = ndi.label(mask)
+            if num > 1:
+                counts = np.bincount(labels.ravel())
+                counts[0] = 0
+                largest = int(counts.argmax())
+                keep = np.isin(labels, [largest])
+                if min_voxels > 0:
+                    # Also keep others above threshold
+                    for i, c in enumerate(counts):
+                        if i > 0 and i != largest and c >= min_voxels:
+                            keep |= np.isin(labels, [i])
+                mask = keep
+            elif min_voxels > 0:
+                mask = remove_small_islands(mask, min_voxels=min_voxels, voxel_volume_mm3=voxel_volume)
+        else:
+            mask = remove_small_islands(mask, min_voxels=min_voxels, voxel_volume_mm3=voxel_volume)
+    
+    # ── Step 5: ROI crop ──
+    crop_slices = None
+    if auto_crop:
+        mask, crop_slices = crop_to_bbox(mask, margin_voxels=5)
+    
+    # ── Step 6: Axis alignment (compute PCA transform for mesh stage) ──
+    alignment_info = {"aligned": False}
+    if align_axis:
+        _, alignment_info = align_to_axis(mask, target_axis=align_axis, spacing=spacing)
+    
+    # ── Step 7: Marching cubes ──
+    src_float = mask.astype(np.float32)
     verts, faces, normals, values = measure.marching_cubes(
-        src,
-        level=level,
+        src_float,
+        level=0.5,
         spacing=spacing,
         step_size=max(1, int(step_size)),
         allow_degenerate=False,
@@ -403,20 +723,51 @@ def dicom_to_bone_mesh(
     verts_xyz = verts[:, [2, 1, 0]]
     mesh = trimesh.Trimesh(vertices=verts_xyz, faces=faces, process=True)
     mesh.remove_unreferenced_vertices()
+    
+    # ── Step 8: Apply PCA alignment to mesh ──
+    if alignment_info.get("aligned"):
+        try:
+            tf = np.array(alignment_info["transform_4x4"])
+            mesh.apply_transform(tf)
+        except Exception:
+            pass
+    
+    # ── Step 9: Mesh cleanup ──
+    mesh = repair_mesh(mesh, fill_holes=mesh_hole_fill, fix_normals=mesh_repair_normals,
+                       decimation_factor=decimation_factor)
+    
+    # ── Step 10: Smoothing ──
     if smoothing_iterations > 0:
         try:
             trimesh.smoothing.filter_laplacian(mesh, lamb=0.35, iterations=int(smoothing_iterations))
         except Exception:
             pass
+    
+    # ── Build meta ──
     meta.update({
         "threshold_hu": threshold_hu,
         "threshold_max_hu": threshold_max_hu,
         "keep_largest": bool(keep_largest),
         "smoothing_iterations": int(smoothing_iterations),
         "step_size": int(step_size),
+        "segmentation_v2": {
+            "preset": preset or None,
+            "morph_closing_radius": morph_closing_radius,
+            "morph_opening_radius": morph_opening_radius,
+            "fill_holes_2d": fill_holes_2d,
+            "fill_holes_3d": fill_holes_3d,
+            "remove_small_islands_mm3": remove_small_islands_mm3,
+            "auto_crop": auto_crop,
+            "align_axis": align_axis or None,
+            "mesh_hole_fill": mesh_hole_fill,
+            "mesh_repair_normals": mesh_repair_normals,
+            "decimation_factor": decimation_factor,
+            "alignment": alignment_info,
+            "crop_slices": [str(s) for s in crop_slices] if crop_slices else None,
+        },
         "generated_vertices": int(len(mesh.vertices)),
         "generated_faces": int(len(mesh.faces)),
-        "warning": "Automatic CT→bone mesh via HU threshold. Needs manual validation/cleanup for surgical use.",
+        "warning": "CT→bone mesh via Segmentation Engine v2 (HU threshold + morphology + cleanup). Not medical-device validated.",
     })
     return mesh, meta
 
@@ -485,6 +836,19 @@ def upload_dicom(
     file: UploadFile = File(...),
     threshold_hu: float = Form(250.0),
     step_size: int = Form(1),
+    threshold_max_hu: float = Form(0.0),
+    preset: str = Form(""),
+    morph_closing_radius: int = Form(0),
+    morph_opening_radius: int = Form(0),
+    fill_holes_2d: bool = Form(False),
+    fill_holes_3d: bool = Form(False),
+    remove_small_islands_mm3: float = Form(0.0),
+    auto_crop: bool = Form(True),
+    align_axis: str = Form(""),
+    mesh_hole_fill: bool = Form(False),
+    mesh_repair_normals: bool = Form(False),
+    smoothing_iterations: int = Form(2),
+    decimation_factor: float = Form(0.0),
 ):
     ext = Path(file.filename or "dicom.zip").suffix.lower()
     if ext not in {".zip", ".dcm", ""}:
@@ -499,7 +863,6 @@ def upload_dicom(
     try:
         if ext == ".zip":
             with zipfile.ZipFile(raw_path) as z:
-                # avoid zip-slip
                 for member in z.infolist():
                     target = (dicom_dir / member.filename).resolve()
                     if not str(target).startswith(str(dicom_dir.resolve())):
@@ -507,7 +870,22 @@ def upload_dicom(
                 z.extractall(dicom_dir)
         else:
             shutil.copy2(raw_path, dicom_dir / "slice.dcm")
-        mesh, meta = dicom_to_bone_mesh(dicom_dir, threshold_hu=threshold_hu, step_size=step_size)
+        mesh, meta = dicom_to_bone_mesh(
+            dicom_dir, threshold_hu=threshold_hu, step_size=step_size,
+            threshold_max_hu=threshold_max_hu if threshold_max_hu > 0 else None,
+            preset=preset,
+            morph_closing_radius=morph_closing_radius,
+            morph_opening_radius=morph_opening_radius,
+            fill_holes_2d=fill_holes_2d,
+            fill_holes_3d=fill_holes_3d,
+            remove_small_islands_mm3=remove_small_islands_mm3,
+            auto_crop=auto_crop,
+            align_axis=align_axis,
+            mesh_hole_fill=mesh_hole_fill,
+            mesh_repair_normals=mesh_repair_normals,
+            smoothing_iterations=smoothing_iterations,
+            decimation_factor=decimation_factor,
+        )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
         raise HTTPException(400, f"DICOM conversion failed: {e}")
@@ -527,6 +905,19 @@ def upload_dicom_folder(
     files: list[UploadFile] = File(...),
     threshold_hu: float = Form(250.0),
     step_size: int = Form(1),
+    threshold_max_hu: float = Form(0.0),
+    preset: str = Form(""),
+    morph_closing_radius: int = Form(0),
+    morph_opening_radius: int = Form(0),
+    fill_holes_2d: bool = Form(False),
+    fill_holes_3d: bool = Form(False),
+    remove_small_islands_mm3: float = Form(0.0),
+    auto_crop: bool = Form(True),
+    align_axis: str = Form(""),
+    mesh_hole_fill: bool = Form(False),
+    mesh_repair_normals: bool = Form(False),
+    smoothing_iterations: int = Form(2),
+    decimation_factor: float = Form(0.0),
 ):
     if not files:
         raise HTTPException(400, "No DICOM files received")
@@ -537,7 +928,6 @@ def upload_dicom_folder(
     try:
         written = 0
         for i, up in enumerate(files):
-            # Browser folder upload may send relative path in filename. Preserve subfolders safely.
             raw_name = (up.filename or f"slice_{i:05d}.dcm").replace("\\", "/")
             parts = [p for p in raw_name.split("/") if p and p not in {".", ".."}]
             rel = Path(*parts) if parts else Path(f"slice_{i:05d}.dcm")
@@ -548,7 +938,22 @@ def upload_dicom_folder(
             with target.open("wb") as f:
                 shutil.copyfileobj(up.file, f)
             written += 1
-        mesh, meta = dicom_to_bone_mesh(dicom_dir, threshold_hu=threshold_hu, step_size=step_size)
+        mesh, meta = dicom_to_bone_mesh(
+            dicom_dir, threshold_hu=threshold_hu, step_size=step_size,
+            threshold_max_hu=threshold_max_hu if threshold_max_hu > 0 else None,
+            preset=preset,
+            morph_closing_radius=morph_closing_radius,
+            morph_opening_radius=morph_opening_radius,
+            fill_holes_2d=fill_holes_2d,
+            fill_holes_3d=fill_holes_3d,
+            remove_small_islands_mm3=remove_small_islands_mm3,
+            auto_crop=auto_crop,
+            align_axis=align_axis,
+            mesh_hole_fill=mesh_hole_fill,
+            mesh_repair_normals=mesh_repair_normals,
+            smoothing_iterations=smoothing_iterations,
+            decimation_factor=decimation_factor,
+        )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
         raise HTTPException(400, f"DICOM folder conversion failed: {e}")
@@ -609,6 +1014,17 @@ def regenerate_mesh(
     series_uid: str = Form(""),
     keep_largest: bool = Form(True),
     smoothing_iterations: int = Form(2),
+    preset: str = Form(""),
+    morph_closing_radius: int = Form(0),
+    morph_opening_radius: int = Form(0),
+    fill_holes_2d: bool = Form(False),
+    fill_holes_3d: bool = Form(False),
+    remove_small_islands_mm3: float = Form(0.0),
+    auto_crop: bool = Form(True),
+    align_axis: str = Form(""),
+    mesh_hole_fill: bool = Form(False),
+    mesh_repair_normals: bool = Form(False),
+    decimation_factor: float = Form(0.0),
 ):
     case_dir = UPLOADS / case_id
     dicom_dir = case_dir / "dicom"
@@ -623,6 +1039,17 @@ def regenerate_mesh(
             series_uid=series_uid or None,
             keep_largest=keep_largest,
             smoothing_iterations=smoothing_iterations,
+            preset=preset,
+            morph_closing_radius=morph_closing_radius,
+            morph_opening_radius=morph_opening_radius,
+            fill_holes_2d=fill_holes_2d,
+            fill_holes_3d=fill_holes_3d,
+            remove_small_islands_mm3=remove_small_islands_mm3,
+            auto_crop=auto_crop,
+            align_axis=align_axis,
+            mesh_hole_fill=mesh_hole_fill,
+            mesh_repair_normals=mesh_repair_normals,
+            decimation_factor=decimation_factor,
         )
     except Exception as e:
         raise HTTPException(400, f"Regenerate mesh failed: {e}")
