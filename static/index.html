@@ -5,105 +5,105 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>3DMedicalPlanner</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; overflow: hidden; height: 100vh; }
-#app { display: flex; height: 100vh; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#e0e0e0;overflow:hidden;height:100vh}
+#app{display:flex;height:100vh}
 
-/* Left sidebar */
-#sidebar {
-  width: 280px; min-width: 280px; background: #12121a;
-  border-right: 1px solid #2a2a3a; display: flex; flex-direction: column;
-  overflow-y: auto; z-index: 10;
-}
-#sidebar h2 { font-size: 13px; color: #888; padding: 12px 14px 6px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #1e1e2e; }
-.section { padding: 8px 14px; border-bottom: 1px solid #1e1e2e; }
-.section label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-.section input, .section select, .section button {
-  width: 100%; padding: 6px 8px; background: #1a1a2a; border: 1px solid #333;
-  color: #e0e0e0; border-radius: 4px; font-size: 12px; margin-bottom: 6px;
-}
-.section button { background: #2a5a3a; border-color: #3a7a4a; cursor: pointer; font-weight: 600; }
-.section button:hover { background: #3a7a4a; }
-.section button.danger { background: #5a2a2a; border-color: #7a3a3a; }
-.section button.danger:hover { background: #7a3a3a; }
-.section-row { display: flex; gap: 6px; }
-.section-row > * { flex: 1; }
+/* SIDEBAR */
+#sidebar{width:300px;min-width:300px;background:#12121a;border-right:1px solid #2a2a3a;display:flex;flex-direction:column;overflow-y:auto;z-index:10}
+#sidebar h2{font-size:13px;color:#888;padding:12px 14px 6px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #1e1e2e}
+.section{padding:8px 14px;border-bottom:1px solid #1e1e2e}
+.section label{display:block;font-size:11px;color:#888;margin-bottom:4px}
+.section input,.section select,.section button{width:100%;padding:6px 8px;background:#1a1a2a;border:1px solid #333;color:#e0e0e0;border-radius:4px;font-size:12px;margin-bottom:6px}
+.section button{background:#2a5a3a;border-color:#3a7a4a;cursor:pointer;font-weight:600}
+.section button:hover{background:#3a7a4a}
+.section button.active{background:#1a5a8a;border-color:#2a7aba}
+.section button.danger{background:#5a2a2a;border-color:#7a3a3a}
+.section button.danger:hover{background:#7a3a3a}
+.section-row{display:flex;gap:6px}
+.section-row>*{flex:1}
+
+/* Tool buttons */
+.tool-group{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.tool-btn{padding:6px 10px;background:#1a1a2a;border:1px solid #333;color:#aaa;cursor:pointer;border-radius:4px;font-size:11px;transition:all .15s}
+.tool-btn:hover{background:#2a2a3a;color:#fff}
+.tool-btn.active{background:#1a3a5a;color:#4a9aff;border-color:#4a9aff}
 
 /* Bone list */
-#bone-list { flex: 1; overflow-y: auto; }
-.bone-item {
-  padding: 8px 14px; cursor: pointer; border-bottom: 1px solid #1a1a2a;
-  display: flex; align-items: center; gap: 8px; font-size: 12px;
-  transition: background 0.15s;
-}
-.bone-item:hover { background: #1a1a2a; }
-.bone-item.selected { background: #1a2a3a; border-left: 3px solid #4a9aff; }
-.bone-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
-.bone-name { flex: 1; }
-.bone-info { font-size: 10px; color: #666; }
+#bone-list{flex:1;overflow-y:auto}
+.bone-item{padding:8px 14px;cursor:pointer;border-bottom:1px solid #1a1a2a;display:flex;align-items:center;gap:8px;font-size:12px;transition:background .15s}
+.bone-item:hover{background:#1a1a2a}
+.bone-item.selected{background:#1a2a3a;border-left:3px solid #4a9aff}
+.bone-color{width:14px;height:14px;border-radius:3px;flex-shrink:0}
 
-/* Status bar */
-#status {
-  padding: 8px 14px; background: #0e0e16; border-top: 1px solid #2a2a3a;
-  font-size: 11px; color: #666; display: flex; justify-content: space-between;
-}
+/* Status */
+#status{padding:8px 14px;background:#0e0e16;border-top:1px solid #2a2a3a;font-size:11px;color:#666;display:flex;justify-content:space-between}
 
-/* Main 3D area */
-#viewer { flex: 1; position: relative; }
-canvas { display: block; }
+/* VIEWER */
+#viewer{flex:1;position:relative}
+canvas{display:block}
 
-/* Gizmo toolbar */
-#gizmo-toolbar {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 4px; background: rgba(20,20,30,0.85); padding: 4px 8px;
-  border-radius: 6px; border: 1px solid #333; z-index: 10;
-}
-#gizmo-toolbar button {
-  padding: 6px 12px; background: transparent; border: 1px solid transparent;
-  color: #aaa; cursor: pointer; border-radius: 4px; font-size: 12px; font-weight: 600;
-}
-#gizmo-toolbar button:hover { background: #2a2a3a; }
-#gizmo-toolbar button.active { background: #1a3a5a; color: #4a9aff; border-color: #4a9aff; }
+/* Toolbar */
+#toolbar{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:4px;background:rgba(20,20,30,0.9);padding:4px 8px;border-radius:6px;border:1px solid #333;z-index:10}
+#toolbar button{padding:6px 12px;background:transparent;border:1px solid transparent;color:#aaa;cursor:pointer;border-radius:4px;font-size:12px;font-weight:600}
+#toolbar button:hover{background:#2a2a3a}
+#toolbar button.active{background:#1a3a5a;color:#4a9aff;border-color:#4a9aff}
 
-/* Hotkey help */
-#hotkeys {
-  position: absolute; bottom: 12px; right: 12px;
-  background: rgba(20,20,30,0.85); padding: 8px 12px; border-radius: 6px;
-  border: 1px solid #333; font-size: 10px; color: #666; z-index: 10;
-  max-width: 220px;
-}
-#hotkeys kbd { background: #2a2a3a; padding: 1px 4px; border-radius: 3px; color: #aaa; }
+/* Plane controls */
+#plane-controls{position:absolute;top:60px;right:12px;background:rgba(20,20,30,0.9);padding:12px;border-radius:6px;border:1px solid #333;z-index:10;width:240px;font-size:12px}
+#plane-controls label{display:block;color:#888;font-size:10px;margin-bottom:2px;margin-top:6px}
+#plane-controls input[type=range]{width:100%;margin-bottom:4px}
+#plane-controls .val{color:#4a9aff;font-size:11px}
+#plane-controls.hidden{display:none}
 
-/* Loading overlay */
-#loading {
-  position: absolute; inset: 0; background: rgba(10,10,15,0.9);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  z-index: 100; font-size: 16px;
-}
-#loading.hidden { display: none; }
-.spinner { width: 40px; height: 40px; border: 3px solid #333; border-top-color: #4a9aff;
-  border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-#load-progress { margin-top: 8px; font-size: 12px; color: #666; }
+/* Hotkeys */
+#hotkeys{position:absolute;bottom:12px;right:12px;background:rgba(20,20,30,0.85);padding:8px 12px;border-radius:6px;border:1px solid #333;font-size:10px;color:#666;z-index:10;max-width:240px}
+#hotkeys kbd{background:#2a2a3a;padding:1px 4px;border-radius:3px;color:#aaa}
+
+/* Loading */
+#loading{position:absolute;inset:0;background:rgba(10,10,15,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;font-size:16px}
+#loading.hidden{display:none}
+.spinner{width:40px;height:40px;border:3px solid #333;border-top-color:#4a9aff;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#load-progress{margin-top:8px;font-size:12px;color:#666}
+
+/* Point markers info */
+#points-info{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.9);padding:8px 16px;border-radius:6px;border:1px solid #333;font-size:12px;z-index:10}
+#points-info.hidden{display:none}
 </style>
 </head>
 <body>
 <div id="app">
-  <!-- Sidebar -->
   <div id="sidebar">
-    <h2>🦴 3DMedicalPlanner</h2>
+    <h2>🦴 3D Medical Planner</h2>
 
+    <!-- Upload -->
     <div class="section">
       <label>DICOM Upload</label>
       <input type="file" id="dicom-input" webkitdirectory directory multiple accept=".dcm,.DCM,.ima,.IMA,application/dicom">
       <div class="section-row">
-        <label><input type="checkbox" id="split-bones" checked> Split bones</label>
+        <label style="font-size:11px"><input type="checkbox" id="split-bones" checked> Split bones (watershed)</label>
       </div>
       <button onclick="uploadDicom()">Upload & Segment</button>
     </div>
 
+    <!-- Tools -->
+    <div class="section">
+      <label>Planning Tools</label>
+      <div class="tool-group">
+        <div class="tool-btn active" data-tool="select" onclick="setTool('select')">🎯 Select</div>
+        <div class="tool-btn" data-tool="place-points" onclick="setTool('place-points')">📍 Place Points</div>
+        <div class="tool-btn" data-tool="define-plane" onclick="setTool('define-plane')">📐 Define Plane</div>
+      </div>
+      <div class="tool-group">
+        <div class="tool-btn" onclick="executeCut()" style="background:#2a3a2a;color:#6f6">✂️ Cut Bone</div>
+        <div class="tool-btn" onclick="clearPlane()">🗑 Clear Plane</div>
+      </div>
+    </div>
+
+    <!-- Transform -->
     <div class="section" id="transform-section" style="display:none">
-      <label>Transform — <span id="selected-bone-name">none</span></label>
+      <label>Transform — <span id="selected-name">none</span></label>
       <div class="section-row">
         <div><label>X</label><input type="number" id="tx" value="0" step="1" onchange="applyTransform()"></div>
         <div><label>Y</label><input type="number" id="ty" value="0" step="1" onchange="applyTransform()"></div>
@@ -111,52 +111,67 @@ canvas { display: block; }
       </div>
       <div class="section-row">
         <button onclick="resetTransform()">Reset</button>
-        <button class="danger" onclick="deleteBone()">Delete</button>
+        <button class="danger" onclick="deleteSelected()">Delete</button>
       </div>
     </div>
 
+    <!-- Objects -->
     <div class="section">
       <label>Objects</label>
-      <div class="section-row">
-        <button onclick="selectAll()">Select All</button>
-        <button onclick="deselectAll()">Deselect</button>
-      </div>
     </div>
-
     <div id="bone-list"></div>
 
     <div id="status">
       <span id="status-text">Ready</span>
-      <span id="bone-count"></span>
+      <span id="obj-count"></span>
     </div>
   </div>
 
   <!-- 3D Viewer -->
   <div id="viewer">
-    <div id="gizmo-toolbar">
-      <button id="btn-translate" class="active" onclick="setGizmoMode('translate')" title="Move (G)">✥ Move</button>
-      <button id="btn-rotate" onclick="setGizmoMode('rotate')" title="Rotate (R)">↻ Rotate</button>
-      <button id="btn-scale" onclick="setGizmoMode('scale')" title="Scale (S)">⤡ Scale</button>
-      <button onclick="duplicateBone()" title="Duplicate (Ctrl+D)">⧉ Clone</button>
-      <button onclick="mirrorBone()" title="Mirror (M)">↔ Mirror</button>
+    <div id="toolbar">
+      <button id="btn-translate" class="active" onclick="setGizmo('translate')" title="Move (G)">✥ Move</button>
+      <button id="btn-rotate" onclick="setGizmo('rotate')" title="Rotate (R)">↻ Rotate</button>
+      <button id="btn-scale" onclick="setGizmo('scale')" title="Scale (S)">⤡ Scale</button>
+      <button onclick="duplicateSelected()" title="Clone (Ctrl+D)">⧉ Clone</button>
+      <button onclick="mirrorSelected()" title="Mirror (M)">↔ Mirror</button>
     </div>
+
+    <!-- Plane adjustment controls -->
+    <div id="plane-controls" class="hidden">
+      <div style="font-weight:600;color:#aaa;margin-bottom:4px">📐 Cutting Plane</div>
+      <label>Tilt X (sagittal) <span class="val" id="tilt-x-val">0°</span></label>
+      <input type="range" id="tilt-x" min="-90" max="90" value="0" oninput="updatePlane()">
+      <label>Tilt Y (coronal) <span class="val" id="tilt-y-val">0°</span></label>
+      <input type="range" id="tilt-y" min="-90" max="90" value="0" oninput="updatePlane()">
+      <label>Tilt Z (axial) <span class="val" id="tilt-z-val">0°</span></label>
+      <input type="range" id="tilt-z" min="-90" max="90" value="0" oninput="updatePlane()">
+      <label>Offset along normal <span class="val" id="offset-val">0</span></label>
+      <input type="range" id="plane-offset" min="-100" max="100" value="0" oninput="updatePlane()">
+      <div style="margin-top:8px;display:flex;gap:4px">
+        <button onclick="executeCut()" style="flex:1;background:#2a3a2a;color:#6f6;font-size:11px;padding:6px;border:1px solid #3a5a3a;border-radius:4px;cursor:pointer">✂️ Execute Cut</button>
+        <button onclick="clearPlane()" style="flex:1;background:#3a2a2a;color:#f66;font-size:11px;padding:6px;border:1px solid #5a3a3a;border-radius:4px;cursor:pointer">Clear</button>
+      </div>
+    </div>
+
     <div id="hotkeys">
+      <kbd>1</kbd> Select &nbsp; <kbd>2</kbd> Place Points &nbsp; <kbd>3</kbd> Define Plane<br>
       <kbd>G</kbd> Move &nbsp; <kbd>R</kbd> Rotate &nbsp; <kbd>S</kbd> Scale<br>
       <kbd>Del</kbd> Delete &nbsp; <kbd>H</kbd> Hide &nbsp; <kbd>J</kbd> Transparent<br>
-      <kbd>Ctrl+D</kbd> Clone &nbsp; <kbd>M</kbd> Mirror<br>
-      <kbd>Esc</kbd> Deselect &nbsp; <kbd>F</kbd> Focus selected
+      <kbd>Ctrl+D</kbd> Clone &nbsp; <kbd>M</kbd> Mirror &nbsp; <kbd>F</kbd> Focus<br>
+      <kbd>Esc</kbd> Deselect &nbsp; <kbd>Enter</kbd> Execute Cut
     </div>
+
+    <div id="points-info" class="hidden">
+      <span id="points-count">0</span>/2 points placed — <span id="points-hint">click on bone surface</span>
+    </div>
+
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
   </div>
 </div>
 
 <script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
-  }
-}
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}
 </script>
 
 <script type="module">
@@ -164,472 +179,622 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
-// ===================== SCENE SETUP =====================
+// ============================================================
+//  SCENE
+// ============================================================
 const container = document.getElementById('viewer');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a12);
 
-const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
+const camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 5000);
 camera.position.set(0, 50, 200);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;
 container.appendChild(renderer.domElement);
 
-// Lights — warm surgical lighting
-const ambientLight = new THREE.AmbientLight(0x404050, 0.6);
-scene.add(ambientLight);
-const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x443322, 0.5);
-scene.add(hemiLight);
-const dirLight1 = new THREE.DirectionalLight(0xffeedd, 1.2);
-dirLight1.position.set(100, 200, 150);
-dirLight1.castShadow = true;
-scene.add(dirLight1);
-const dirLight2 = new THREE.DirectionalLight(0xddddff, 0.6);
-dirLight2.position.set(-100, -50, -100);
-scene.add(dirLight2);
+// Lights
+scene.add(new THREE.AmbientLight(0x404050, 0.6));
+scene.add(new THREE.HemisphereLight(0x8899bb, 0x443322, 0.5));
+const dl1 = new THREE.DirectionalLight(0xffeedd, 1.2);
+dl1.position.set(100,200,150); scene.add(dl1);
+const dl2 = new THREE.DirectionalLight(0xddddff, 0.6);
+dl2.position.set(-100,-50,-100); scene.add(dl2);
 
-// Grid
-const grid = new THREE.GridHelper(400, 40, 0x222233, 0x16161e);
-scene.add(grid);
+scene.add(new THREE.GridHelper(400, 40, 0x222233, 0x16161e));
 
-// ===================== CONTROLS =====================
-const orbitControls = new OrbitControls(camera, renderer.domElement);
-orbitControls.enableDamping = true;
-orbitControls.dampingFactor = 0.08;
-orbitControls.rotateSpeed = 0.8;
+// ============================================================
+//  CONTROLS
+// ============================================================
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true; orbit.dampingFactor = 0.08;
 
-// TransformControls gizmo
-const transformControls = new TransformControls(camera, renderer.domElement);
-transformControls.setMode('translate');
-transformControls.setSize(0.8);
-scene.add(transformControls.getHelper());
-
-transformControls.addEventListener('dragging-changed', (event) => {
-  orbitControls.enabled = !event.value;
-});
-
-transformControls.addEventListener('objectChange', () => {
-  // Update the transform inputs when dragging
-  if (selectedBoneIndex >= 0 && selectedBoneIndex < boneObjects.length) {
-    const obj = boneObjects[selectedBoneIndex].mesh;
-    const orig = boneObjects[selectedBoneIndex].originalPosition;
-    document.getElementById('tx').value = Math.round(obj.position.x - orig.x);
-    document.getElementById('ty').value = Math.round(obj.position.y - orig.y);
-    document.getElementById('tz').value = Math.round(obj.position.z - orig.z);
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setMode('translate'); gizmo.setSize(0.8);
+scene.add(gizmo);
+gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; });
+gizmo.addEventListener('objectChange', () => {
+  if (selectedIdx >= 0 && selectedIdx < objects.length) {
+    const o = objects[selectedIdx];
+    document.getElementById('tx').value = Math.round(o.mesh.position.x - o.origPos.x);
+    document.getElementById('ty').value = Math.round(o.mesh.position.y - o.origPos.y);
+    document.getElementById('tz').value = Math.round(o.mesh.position.z - o.origPos.z);
   }
 });
 
-// ===================== RAYCASTER (click to select) =====================
+// Raycaster
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-container.addEventListener('click', (event) => {
-  // Ignore if transform controls are being dragged
-  if (transformControls.dragging) return;
+// ============================================================
+//  STATE
+// ============================================================
+const COLORS = [0xE8D5B7,0xD4C4A8,0xC9B896,0xBFA87A,0xB59868,0xF5E6D0,0xDBC8AA,0xC4B08C,0xAD9870,0x9A8460,0xE0CDB0,0xCCC09A,0xB8A880,0xA49068,0x907850];
 
+let objects = [];      // {mesh, name, color, origPos, visible, transparent, caseId, boneIndex}
+let selectedIdx = -1;
+let currentTool = 'select';
+let caseId = null;
+let placedPoints = [];  // THREE.Vector3[]
+let pointMarkers = [];  // THREE.Mesh[]
+let cuttingPlane = null; // {origin, normal, tiltX, tiltY, tiltZ, offset}
+let planeMesh = null;    // THREE.Mesh visualization
+let planeHelperLine = null;
+
+// ============================================================
+//  TOOL MANAGEMENT
+// ============================================================
+window.setTool = function(tool) {
+  currentTool = tool;
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === tool);
+  });
+  // Clear points if switching away
+  if (tool !== 'place-points') {
+    // keep points if plane is defined
+  }
+  if (tool === 'define-plane') {
+    if (placedPoints.length >= 2) {
+      buildPlaneFromPoints();
+    } else {
+      setStatus('Place 2 points first (use Place Points tool)');
+      setTool('place-points');
+    }
+  }
+  if (tool === 'place-points') {
+    clearPlacedPoints();
+    document.getElementById('points-info').classList.remove('hidden');
+    setStatus('Click on bone surface to place points');
+  } else {
+    document.getElementById('points-info').classList.add('hidden');
+  }
+};
+
+// ============================================================
+//  CLICK HANDLER — tool-dependent
+// ============================================================
+container.addEventListener('click', (event) => {
+  if (gizmo.dragging) return;
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
   raycaster.setFromCamera(mouse, camera);
 
-  // Get all bone meshes
-  const meshes = boneObjects.map(b => b.mesh);
-  const intersects = raycaster.intersectObjects(meshes, false);
-
-  if (intersects.length > 0) {
-    const hitMesh = intersects[0].object;
-    const idx = boneObjects.findIndex(b => b.mesh === hitMesh);
-    if (idx >= 0) {
-      selectBone(idx);
-    }
-  } else {
-    deselectAll();
+  if (currentTool === 'select') {
+    handleSelectClick();
+  } else if (currentTool === 'place-points') {
+    handlePlacePointClick();
   }
 });
 
-// ===================== BONE DATA =====================
-const BONE_COLORS = [
-  0xE8D5B7, 0xD4C4A8, 0xC9B896, 0xBFA87A, 0xB59868,
-  0xF5E6D0, 0xDBC8AA, 0xC4B08C, 0xAD9870, 0x9A8460,
-  0xE0CDB0, 0xCCC09A, 0xB8A880, 0xA49068, 0x907850,
-  0xF0DCC0, 0xD8C8A4, 0xC0B088, 0xA89870, 0x908058,
-];
+function handleSelectClick() {
+  const meshes = objects.map(o => o.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    const idx = objects.findIndex(o => o.mesh === hits[0].object);
+    if (idx >= 0) selectObject(idx);
+  } else {
+    deselectAll();
+  }
+}
 
-let boneObjects = []; // [{mesh, name, color, originalPosition, visible, transparent}]
-let selectedBoneIndex = -1;
+function handlePlacePointClick() {
+  // Intersect with all bone meshes
+  const meshes = objects.map(o => o.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length === 0) return;
 
-// ===================== UPLOAD =====================
-window.uploadDicom = async function() {
-  const input = document.getElementById('dicom-input');
-  if (!input.files.length) { alert('Select a DICOM folder'); return; }
+  const point = hits[0].point.clone();
+  placedPoints.push(point);
 
+  // Add visual marker (small sphere)
+  const markerGeo = new THREE.SphereGeometry(2, 16, 16);
+  const markerMat = new THREE.MeshBasicMaterial({color: 0xff4444});
+  const marker = new THREE.Mesh(markerGeo, markerMat);
+  marker.position.copy(point);
+  scene.add(marker);
+  pointMarkers.push(marker);
+
+  // Update UI
+  document.getElementById('points-count').textContent = placedPoints.length;
+  if (placedPoints.length >= 2) {
+    document.getElementById('points-hint').textContent = 'press 3 or click Define Plane';
+    setStatus('2 points placed — switch to Define Plane (press 3)');
+  } else {
+    document.getElementById('points-hint').textContent = 'click on bone surface';
+  }
+}
+
+function clearPlacedPoints() {
+  placedPoints = [];
+  pointMarkers.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
+  pointMarkers = [];
+  document.getElementById('points-count').textContent = '0';
+  document.getElementById('points-hint').textContent = 'click on bone surface';
+}
+
+// ============================================================
+//  PLANE DEFINITION
+// ============================================================
+function buildPlaneFromPoints() {
+  if (placedPoints.length < 2) { setStatus('Need 2 points'); return; }
+
+  const p1 = placedPoints[0];
+  const p2 = placedPoints[1];
+  const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+  // Compute normal: perpendicular to p1-p2 line, using the "up" direction as reference
+  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  let normal = new THREE.Vector3().crossVectors(dir, up).normalize();
+  if (normal.length() < 0.01) {
+    normal = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, 1)).normalize();
+  }
+
+  cuttingPlane = {
+    origin: center.clone(),
+    baseNormal: normal.clone(),
+    normal: normal.clone(),
+    tiltX: 0, tiltY: 0, tiltZ: 0, offset: 0
+  };
+
+  // Show plane controls
+  document.getElementById('plane-controls').classList.remove('hidden');
+  document.getElementById('tilt-x').value = 0;
+  document.getElementById('tilt-y').value = 0;
+  document.getElementById('tilt-z').value = 0;
+  document.getElementById('plane-offset').value = 0;
+
+  createPlaneVisual();
+  setTool('define-plane');
+  document.getElementById('points-info').classList.add('hidden');
+  setStatus('Plane defined — adjust with sliders, then Execute Cut');
+}
+
+window.updatePlane = function() {
+  if (!cuttingPlane) return;
+  const tiltX = parseFloat(document.getElementById('tilt-x').value);
+  const tiltY = parseFloat(document.getElementById('tilt-y').value);
+  const tiltZ = parseFloat(document.getElementById('tilt-z').value);
+  const offset = parseFloat(document.getElementById('plane-offset').value);
+
+  document.getElementById('tilt-x-val').textContent = tiltX + '°';
+  document.getElementById('tilt-y-val').textContent = tiltY + '°';
+  document.getElementById('tilt-z-val').textContent = tiltZ + '°';
+  document.getElementById('offset-val').textContent = offset;
+
+  // Apply rotations to base normal
+  const euler = new THREE.Euler(
+    THREE.MathUtils.degToRad(tiltX),
+    THREE.MathUtils.degToRad(tiltY),
+    THREE.MathUtils.degToRad(tiltZ)
+  );
+  const normal = cuttingPlane.baseNormal.clone().applyEuler(euler).normalize();
+  cuttingPlane.normal = normal;
+  cuttingPlane.tiltX = tiltX;
+  cuttingPlane.tiltY = tiltY;
+  cuttingPlane.tiltZ = tiltZ;
+  cuttingPlane.offset = offset;
+
+  // Update origin with offset along normal
+  const p1 = placedPoints[0];
+  const p2 = placedPoints[1];
+  const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+  cuttingPlane.origin = center.clone().add(normal.clone().multiplyScalar(offset));
+
+  updatePlaneVisual();
+};
+
+function createPlaneVisual() {
+  removePlaneVisual();
+  // Create a large plane mesh
+  const geo = new THREE.PlaneGeometry(500, 500);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x4488ff, transparent: true, opacity: 0.2,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  planeMesh = new THREE.Mesh(geo, mat);
+  scene.add(planeMesh);
+
+  // Normal line
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,1)
+  ]);
+  const lineMat = new THREE.LineBasicMaterial({color: 0xff4444, linewidth: 2});
+  planeHelperLine = new THREE.Line(lineGeo, lineMat);
+  scene.add(planeHelperLine);
+
+  updatePlaneVisual();
+}
+
+function updatePlaneVisual() {
+  if (!planeMesh || !cuttingPlane) return;
+  planeMesh.position.copy(cuttingPlane.origin);
+  // Orient plane to face the normal direction
+  const up = new THREE.Vector3(0, 0, 1);
+  const quat = new THREE.Quaternion().setFromUnitVectors(up, cuttingPlane.normal);
+  planeMesh.quaternion.copy(quat);
+
+  // Update normal line
+  if (planeHelperLine) {
+    planeHelperLine.position.copy(cuttingPlane.origin);
+    planeHelperLine.quaternion.copy(quat);
+    planeHelperLine.scale.set(1, 1, 80);
+  }
+}
+
+function removePlaneVisual() {
+  if (planeMesh) { scene.remove(planeMesh); planeMesh.geometry.dispose(); planeMesh.material.dispose(); planeMesh = null; }
+  if (planeHelperLine) { scene.remove(planeHelperLine); planeHelperLine.geometry.dispose(); planeHelperLine.material.dispose(); planeHelperLine = null; }
+}
+
+window.clearPlane = function() {
+  cuttingPlane = null;
+  removePlaneVisual();
+  clearPlacedPoints();
+  document.getElementById('plane-controls').classList.add('hidden');
+  setStatus('Plane cleared');
+};
+
+// ============================================================
+//  EXECUTE CUT
+// ============================================================
+window.executeCut = async function() {
+  if (!cuttingPlane) { setStatus('Define a plane first'); return; }
+  if (selectedIdx < 0) { setStatus('Select a bone first'); return; }
+
+  const obj = objects[selectedIdx];
+  if (!obj.caseId || obj.boneIndex === undefined) {
+    setStatus('Can only cut bones from DICOM segmentation');
+    return;
+  }
+
+  setStatus('Cutting bone...');
   const loading = document.getElementById('loading');
   const progress = document.getElementById('load-progress');
   loading.classList.remove('hidden');
-  progress.textContent = 'Uploading DICOM files...';
-
-  const formData = new FormData();
-  const splitBones = document.getElementById('split-bones').checked;
-
-  for (const file of input.files) {
-    formData.append('files', file, file.webkitRelativePath || file.name);
-  }
-  formData.append('split_bones', splitBones ? 'true' : 'false');
+  progress.textContent = 'Computing cut...';
 
   try {
-    progress.textContent = 'Segmenting bones (this may take 30-60s)...';
-    const resp = await fetch('/api/upload-dicom', { method: 'POST', body: formData });
+    const formData = new FormData();
+    formData.append('case_id', obj.caseId);
+    formData.append('bone_index', obj.boneIndex);
+    formData.append('plane_origin', JSON.stringify([
+      cuttingPlane.origin.x, cuttingPlane.origin.y, cuttingPlane.origin.z
+    ]));
+    formData.append('plane_normal', JSON.stringify([
+      cuttingPlane.normal.x, cuttingPlane.normal.y, cuttingPlane.normal.z
+    ]));
 
+    const resp = await fetch('/api/cut-bone', {method: 'POST', body: formData});
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-      throw new Error(err.detail || 'Upload failed');
+      const err = await resp.json().catch(() => ({detail: resp.statusText}));
+      throw new Error(err.detail || 'Cut failed');
     }
 
     const data = await resp.json();
-    progress.textContent = `Loading ${data.meshes.length} bone(s)...`;
+    progress.textContent = 'Loading fragments...';
 
-    // Clear old bones
-    clearBones();
+    // Remove original bone
+    const origColor = obj.color;
+    const origName = obj.name;
+    scene.remove(obj.mesh);
+    obj.mesh.geometry.dispose();
+    obj.mesh.material.dispose();
+    objects.splice(selectedIdx, 1);
+    selectedIdx = -1;
+    gizmo.detach();
 
-    // Load each bone mesh
-    for (let i = 0; i < data.meshes.length; i++) {
-      const meshData = data.meshes[i];
-      progress.textContent = `Loading bone ${i + 1}/${data.meshes.length}...`;
-      await loadBoneMesh(meshData, i);
+    // Add positive fragment
+    if (!data.positive.empty) {
+      addFragment(data.positive, origColor + 0x222200, `${origName}_pos`, obj.caseId);
+    }
+    // Add negative fragment
+    if (!data.negative.empty) {
+      addFragment(data.negative, origColor - 0x002200, `${origName}_neg`, obj.caseId);
     }
 
-    // Fit camera to all bones
-    fitCameraToBones();
+    // Clear plane
+    clearPlane();
+    updateBoneList();
+    setStatus(`Bone cut into ${data.positive.empty ? 0 : 1} + ${data.negative.empty ? 0 : 1} fragments`);
 
-    document.getElementById('status-text').textContent =
-      `Loaded ${data.meshes.length} bone(s) | Seg: ${data.segmentation?.method || 'default'}`;
-    document.getElementById('bone-count').textContent =
-      `${data.meshes.length} objects`;
-
-    // Auto-select first bone
-    if (boneObjects.length > 0) selectBone(0);
-
-  } catch (e) {
-    alert('Error: ' + e.message);
-    document.getElementById('status-text').textContent = 'Error: ' + e.message;
+  } catch(e) {
+    setStatus('Cut error: ' + e.message);
   } finally {
     loading.classList.add('hidden');
   }
 };
 
-// ===================== LOAD BONE MESH =====================
-async function loadBoneMesh(meshData, index) {
+function addFragment(meshData, color, name, cId) {
   const geo = new THREE.BufferGeometry();
-
-  // Vertices
-  const verts = new Float32Array(meshData.vertices.flat());
-  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-
-  // Faces
-  const indices = new Uint32Array(meshData.faces.flat());
-  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(meshData.vertices.flat()), 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.faces.flat()), 1));
   geo.computeVertexNormals();
 
-  // Material — bone-like PBR
-  const color = BONE_COLORS[index % BONE_COLORS.length];
   const mat = new THREE.MeshStandardMaterial({
-    color: color,
-    roughness: 0.55,
-    metalness: 0.05,
-    side: THREE.DoubleSide,
-    flatShading: false,
+    color: color & 0xffffff, roughness: 0.55, metalness: 0.05,
+    side: THREE.DoubleSide
   });
-
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.name = meshData.name || `bone_${index}`;
-
+  mesh.name = name;
   scene.add(mesh);
 
-  boneObjects.push({
-    mesh: mesh,
-    name: meshData.name || `Bone ${index + 1}`,
-    color: color,
-    originalPosition: mesh.position.clone(),
-    visible: true,
-    transparent: false,
+  objects.push({
+    mesh, name, color: color & 0xffffff,
+    origPos: mesh.position.clone(),
+    visible: true, transparent: false,
+    caseId: cId, boneIndex: undefined // fragments don't have boneIndex
   });
 
-  updateBoneList();
+  selectObject(objects.length - 1);
 }
 
-// ===================== SELECTION =====================
-window.selectBone = function(index) {
-  // Deselect previous
-  if (selectedBoneIndex >= 0 && selectedBoneIndex < boneObjects.length) {
-    const prev = boneObjects[selectedBoneIndex];
-    prev.mesh.material.emissive.setHex(0x000000);
-    prev.mesh.material.emissiveIntensity = 0;
+// ============================================================
+//  OBJECT SELECTION
+// ============================================================
+window.selectObject = function(idx) {
+  if (selectedIdx >= 0 && selectedIdx < objects.length) {
+    objects[selectedIdx].mesh.material.emissive.setHex(0x000000);
+    objects[selectedIdx].mesh.material.emissiveIntensity = 0;
   }
-
-  selectedBoneIndex = index;
-
-  if (index >= 0 && index < boneObjects.length) {
-    const bone = boneObjects[index];
-
-    // Highlight selected bone
-    bone.mesh.material.emissive.setHex(0x1a3a5a);
-    bone.mesh.material.emissiveIntensity = 0.4;
-
-    // Attach transform controls
-    transformControls.attach(bone.mesh);
-
-    // Show transform section
-    const section = document.getElementById('transform-section');
-    section.style.display = 'block';
-    document.getElementById('selected-bone-name').textContent = bone.name;
-
-    // Update transform inputs
-    const orig = bone.originalPosition;
-    document.getElementById('tx').value = Math.round(bone.mesh.position.x - orig.x);
-    document.getElementById('ty').value = Math.round(bone.mesh.position.y - orig.y);
-    document.getElementById('tz').value = Math.round(bone.mesh.position.z - orig.z);
-
-    // Focus camera on selected bone
-    orbitControls.target.copy(bone.mesh.position);
+  selectedIdx = idx;
+  if (idx >= 0 && idx < objects.length) {
+    const o = objects[idx];
+    o.mesh.material.emissive.setHex(0x1a3a5a);
+    o.mesh.material.emissiveIntensity = 0.4;
+    gizmo.attach(o.mesh);
+    document.getElementById('transform-section').style.display = 'block';
+    document.getElementById('selected-name').textContent = o.name;
+    const op = o.origPos;
+    document.getElementById('tx').value = Math.round(o.mesh.position.x - op.x);
+    document.getElementById('ty').value = Math.round(o.mesh.position.y - op.y);
+    document.getElementById('tz').value = Math.round(o.mesh.position.z - op.z);
+    orbit.target.copy(o.mesh.position);
   } else {
-    transformControls.detach();
+    gizmo.detach();
     document.getElementById('transform-section').style.display = 'none';
   }
-
   updateBoneList();
 };
 
-window.deselectAll = function() {
-  selectBone(-1);
-};
+window.deselectAll = function() { selectObject(-1); };
 
-window.selectAll = function() {
-  if (boneObjects.length > 0) selectBone(0);
-};
-
-// ===================== TRANSFORM =====================
-window.setGizmoMode = function(mode) {
-  transformControls.setMode(mode);
-  document.querySelectorAll('#gizmo-toolbar button').forEach(b => b.classList.remove('active'));
-  document.getElementById('btn-' + mode)?.classList.add('active');
+// ============================================================
+//  GIZMO & TRANSFORM
+// ============================================================
+window.setGizmo = function(mode) {
+  gizmo.setMode(mode);
+  document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-'+mode)?.classList.add('active');
 };
 
 window.applyTransform = function() {
-  if (selectedBoneIndex < 0) return;
-  const bone = boneObjects[selectedBoneIndex];
-  const tx = parseFloat(document.getElementById('tx').value) || 0;
-  const ty = parseFloat(document.getElementById('ty').value) || 0;
-  const tz = parseFloat(document.getElementById('tz').value) || 0;
-  bone.mesh.position.set(
-    bone.originalPosition.x + tx,
-    bone.originalPosition.y + ty,
-    bone.originalPosition.z + tz,
+  if (selectedIdx < 0) return;
+  const o = objects[selectedIdx];
+  o.mesh.position.set(
+    o.origPos.x + (parseFloat(document.getElementById('tx').value)||0),
+    o.origPos.y + (parseFloat(document.getElementById('ty').value)||0),
+    o.origPos.z + (parseFloat(document.getElementById('tz').value)||0)
   );
 };
 
 window.resetTransform = function() {
-  if (selectedBoneIndex < 0) return;
-  const bone = boneObjects[selectedBoneIndex];
-  bone.mesh.position.copy(bone.originalPosition);
-  bone.mesh.rotation.set(0, 0, 0);
-  bone.mesh.scale.set(1, 1, 1);
+  if (selectedIdx < 0) return;
+  const o = objects[selectedIdx];
+  o.mesh.position.copy(o.origPos);
+  o.mesh.rotation.set(0,0,0);
+  o.mesh.scale.set(1,1,1);
   document.getElementById('tx').value = 0;
   document.getElementById('ty').value = 0;
   document.getElementById('tz').value = 0;
 };
 
-// ===================== BONE OPERATIONS =====================
-window.deleteBone = function() {
-  if (selectedBoneIndex < 0) return;
-  const bone = boneObjects[selectedBoneIndex];
-  transformControls.detach();
-  scene.remove(bone.mesh);
-  bone.mesh.geometry.dispose();
-  bone.mesh.material.dispose();
-  boneObjects.splice(selectedBoneIndex, 1);
-  selectedBoneIndex = -1;
+// ============================================================
+//  BONE OPERATIONS
+// ============================================================
+window.deleteSelected = function() {
+  if (selectedIdx < 0) return;
+  const o = objects[selectedIdx];
+  gizmo.detach(); scene.remove(o.mesh);
+  o.mesh.geometry.dispose(); o.mesh.material.dispose();
+  objects.splice(selectedIdx, 1); selectedIdx = -1;
   document.getElementById('transform-section').style.display = 'none';
   updateBoneList();
 };
 
-window.duplicateBone = function() {
-  if (selectedBoneIndex < 0) return;
-  const src = boneObjects[selectedBoneIndex];
+window.duplicateSelected = function() {
+  if (selectedIdx < 0) return;
+  const src = objects[selectedIdx];
   const clone = src.mesh.clone();
   clone.material = src.mesh.material.clone();
-  clone.position.x += 20; // Offset so it's visible
+  clone.position.x += 20;
   clone.name = src.name + '_copy';
   scene.add(clone);
-
-  boneObjects.push({
-    mesh: clone,
-    name: clone.name,
-    color: src.color,
-    originalPosition: clone.position.clone(),
-    visible: true,
-    transparent: false,
-  });
-
-  selectBone(boneObjects.length - 1);
+  objects.push({mesh:clone, name:clone.name, color:src.color, origPos:clone.position.clone(), visible:true, transparent:false, caseId:src.caseId});
+  selectObject(objects.length-1);
   updateBoneList();
 };
 
-window.mirrorBone = function() {
-  if (selectedBoneIndex < 0) return;
-  const src = boneObjects[selectedBoneIndex];
+window.mirrorSelected = function() {
+  if (selectedIdx < 0) return;
+  const src = objects[selectedIdx];
   const mirror = src.mesh.clone();
   mirror.material = src.mesh.material.clone();
-  mirror.scale.x *= -1; // Mirror on X axis
+  mirror.scale.x *= -1;
   mirror.name = src.name + '_mirror';
   scene.add(mirror);
-
-  boneObjects.push({
-    mesh: mirror,
-    name: mirror.name,
-    color: src.color,
-    originalPosition: mirror.position.clone(),
-    visible: true,
-    transparent: false,
-  });
-
-  selectBone(boneObjects.length - 1);
+  objects.push({mesh:mirror, name:mirror.name, color:src.color, origPos:mirror.position.clone(), visible:true, transparent:false, caseId:src.caseId});
+  selectObject(objects.length-1);
   updateBoneList();
 };
 
-// ===================== VISIBILITY =====================
-function toggleBoneVis(index) {
-  const bone = boneObjects[index];
-  bone.visible = !bone.visible;
-  bone.mesh.visible = bone.visible;
-  updateBoneList();
-}
-
-function toggleBoneTrans(index) {
-  const bone = boneObjects[index];
-  bone.transparent = !bone.transparent;
-  bone.mesh.material.transparent = bone.transparent;
-  bone.mesh.material.opacity = bone.transparent ? 0.3 : 1.0;
-  bone.mesh.material.depthWrite = !bone.transparent;
-  bone.mesh.material.needsUpdate = true;
-  updateBoneList();
-}
-
-// ===================== BONE LIST UI =====================
+// ============================================================
+//  BONE LIST UI
+// ============================================================
 function updateBoneList() {
-  const container = document.getElementById('bone-list');
-  container.innerHTML = boneObjects.map((b, i) => {
-    const sel = i === selectedBoneIndex ? 'selected' : '';
-    const vis = b.visible ? '👁' : '🚫';
-    const trans = b.transparent ? 'T' : '';
-    const colorHex = '#' + b.color.toString(16).padStart(6, '0');
-    return `<div class="bone-item ${sel}" onclick="selectBone(${i})">
-      <div class="bone-color" style="background:${colorHex}"></div>
-      <span class="bone-name">${b.name} ${trans}</span>
-      <span style="cursor:pointer" onclick="event.stopPropagation();toggleBoneVis(${i})">${vis}</span>
-    </div>`;
+  const el = document.getElementById('bone-list');
+  el.innerHTML = objects.map((o, i) => {
+    const sel = i === selectedIdx ? 'selected' : '';
+    const vis = o.visible ? '👁' : '🚫';
+    const hex = '#'+o.color.toString(16).padStart(6,'0');
+    return `<div class="bone-item ${sel}" onclick="selectObject(${i})"><div class="bone-color" style="background:${hex}"></div><span style="flex:1">${o.name}</span><span style="cursor:pointer" onclick="event.stopPropagation();toggleVis(${i})">${vis}</span></div>`;
   }).join('');
-
-  document.getElementById('bone-count').textContent = `${boneObjects.length} objects`;
+  document.getElementById('obj-count').textContent = objects.length + ' objects';
 }
+window.selectObject = selectObject;
 
-// Make functions global
-window.toggleBoneVis = toggleBoneVis;
-window.toggleBoneTrans = toggleBoneTrans;
-
-// ===================== CLEAR =====================
-function clearBones() {
-  transformControls.detach();
-  boneObjects.forEach(b => {
-    scene.remove(b.mesh);
-    b.mesh.geometry.dispose();
-    b.mesh.material.dispose();
-  });
-  boneObjects = [];
-  selectedBoneIndex = -1;
-  document.getElementById('transform-section').style.display = 'none';
+function toggleVis(i) {
+  const o = objects[i];
+  o.visible = !o.visible; o.mesh.visible = o.visible;
   updateBoneList();
 }
+window.toggleVis = toggleVis;
 
-// ===================== CAMERA =====================
-function fitCameraToBones() {
-  if (boneObjects.length === 0) return;
+// ============================================================
+//  UPLOAD
+// ============================================================
+window.uploadDicom = async function() {
+  const input = document.getElementById('dicom-input');
+  if (!input.files.length) { alert('Select a DICOM folder'); return; }
+  const loading = document.getElementById('loading');
+  const progress = document.getElementById('load-progress');
+  loading.classList.remove('hidden');
+  progress.textContent = 'Uploading DICOM files...';
+
+  const fd = new FormData();
+  for (const f of input.files) fd.append('files', f, f.webkitRelativePath || f.name);
+  fd.append('split_bones', document.getElementById('split-bones').checked ? 'true' : 'false');
+
+  try {
+    progress.textContent = 'Segmenting bones (30-60s)...';
+    const resp = await fetch('/api/upload-dicom', {method:'POST', body:fd});
+    if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail||'Upload failed'); }
+    const data = await resp.json();
+
+    caseId = data.case_id;
+    progress.textContent = `Loading ${data.bone_count} bone(s)...`;
+
+    // Clear old
+    gizmo.detach();
+    objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+    objects = []; selectedIdx = -1;
+
+    // Load bones from server URLs
+    for (let i = 0; i < data.bone_count; i++) {
+      progress.textContent = `Loading bone ${i+1}/${data.bone_count}...`;
+      const url = `/api/cases/${caseId}/bone/${i}.stl`;
+
+      // Use THREE.STLLoader
+      const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
+      const loader = new STLLoader();
+      const geo = await new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+      geo.computeVertexNormals();
+
+      const color = COLORS[i % COLORS.length];
+      const mat = new THREE.MeshStandardMaterial({color, roughness:0.55, metalness:0.05, side:THREE.DoubleSide});
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = `bone_${i}`;
+      scene.add(mesh);
+
+      objects.push({
+        mesh, name: data.bones[i]?.name || `Bone ${i+1}`, color,
+        origPos: mesh.position.clone(), visible: true, transparent: false,
+        caseId: caseId, boneIndex: i
+      });
+    }
+
+    fitCamera();
+    if (objects.length > 0) selectObject(0);
+    setStatus(`Loaded ${data.bone_count} bone(s) — case ${caseId}`);
+
+  } catch(e) {
+    setStatus('Error: ' + e.message);
+  } finally {
+    loading.classList.add('hidden');
+  }
+};
+
+// ============================================================
+//  CAMERA
+// ============================================================
+function fitCamera() {
+  if (!objects.length) return;
   const box = new THREE.Box3();
-  boneObjects.forEach(b => box.expandByObject(b.mesh));
+  objects.forEach(o => box.expandByObject(o.mesh));
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const dist = maxDim * 1.8;
-
-  camera.position.set(center.x, center.y + dist * 0.3, center.z + dist);
-  orbitControls.target.copy(center);
-  camera.lookAt(center);
-  orbitControls.update();
+  camera.position.set(center.x, center.y + maxDim*0.3, center.z + maxDim*1.8);
+  orbit.target.copy(center); orbit.update();
 }
 
-// Focus on selected bone
-function focusSelectedBone() {
-  if (selectedBoneIndex < 0) return;
-  const bone = boneObjects[selectedBoneIndex];
-  const box = new THREE.Box3().setFromObject(bone.mesh);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-
-  orbitControls.target.copy(center);
-  camera.position.set(center.x, center.y + maxDim * 0.5, center.z + maxDim * 2);
-  camera.lookAt(center);
-  orbitControls.update();
-}
-
-// ===================== KEYBOARD =====================
-document.addEventListener('keydown', (e) => {
-  // Don't capture if typing in input
+// ============================================================
+//  KEYBOARD
+// ============================================================
+document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-
   switch(e.key) {
-    case 'g': case 'G': setGizmoMode('translate'); break;
-    case 'r': case 'R': setGizmoMode('rotate'); break;
-    case 's': case 'S': setGizmoMode('scale'); break;
-    case 'Delete': case 'Backspace': deleteBone(); e.preventDefault(); break;
-    case 'h': case 'H': if (selectedBoneIndex >= 0) toggleBoneVis(selectedBoneIndex); break;
-    case 'j': case 'J': if (selectedBoneIndex >= 0) toggleBoneTrans(selectedBoneIndex); break;
-    case 'm': case 'M': mirrorBone(); break;
-    case 'f': case 'F': focusSelectedBone(); break;
-    case 'Escape': deselectAll(); break;
-    case 'd':
-      if (e.ctrlKey || e.metaKey) { duplicateBone(); e.preventDefault(); }
-      break;
+    case '1': setTool('select'); break;
+    case '2': setTool('place-points'); break;
+    case '3': setTool('define-plane'); break;
+    case 'g': case 'G': setGizmo('translate'); break;
+    case 'r': case 'R': setGizmo('rotate'); break;
+    case 's': case 'S': setGizmo('scale'); break;
+    case 'Delete': case 'Backspace': deleteSelected(); e.preventDefault(); break;
+    case 'Enter': executeCut(); break;
+    case 'Escape': deselectAll(); clearPlacedPoints(); break;
+    case 'f': case 'F': if(selectedIdx>=0){const o=objects[selectedIdx];orbit.target.copy(o.mesh.position);} break;
+    case 'h': case 'H': if(selectedIdx>=0) toggleVis(selectedIdx); break;
+    case 'd': if(e.ctrlKey||e.metaKey){duplicateSelected();e.preventDefault();} break;
+    case 'm': case 'M': mirrorSelected(); break;
   }
 });
 
-// ===================== RESIZE =====================
+// ============================================================
+//  RESIZE & RENDER
+// ============================================================
+function setStatus(msg) { document.getElementById('status-text').textContent = msg; }
+window.setStatus = setStatus;
+
 window.addEventListener('resize', () => {
-  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.aspect = container.clientWidth/container.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth, container.clientHeight);
 });
 
-// ===================== RENDER LOOP =====================
-function animate() {
-  requestAnimationFrame(animate);
-  orbitControls.update();
-  renderer.render(scene, camera);
-}
+function animate() { requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); }
 animate();
 
-// Hide loading on startup
 document.getElementById('loading').classList.add('hidden');
-document.getElementById('status-text').textContent = 'Ready — upload DICOM to begin';
-
+setStatus('Ready — upload DICOM to begin planning');
 </script>
 </body>
 </html>

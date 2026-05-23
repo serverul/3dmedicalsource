@@ -524,7 +524,7 @@ def _auto_threshold(vol: np.ndarray, sensitivity: str = "medium") -> tuple[float
 
     valley_search = (bin_center
 
-... [OUTPUT TRUNCATED - 87979 chars omitted out of 137979 total] ...
+... [OUTPUT TRUNCATED - 90249 chars omitted out of 140249 total] ...
 
 n operation with fallback.
 
