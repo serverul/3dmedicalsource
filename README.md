@@ -14,12 +14,21 @@ Working local web app:
 - DICOM ZIP upload
 - full DICOM folder upload via browser `webkitdirectory`
 - CT → HU volume → bone mesh STL via marching cubes
-- segmentation controls:
+- **Segmentation Engine v2** with:
   - DICOM series selection
-  - HU min/max
+  - HU min/max thresholding
   - keep largest connected component
   - smoothing iterations
   - step size
+  - **binary morphology**: closing, opening, dilation, erosion
+  - **fill holes** (3D binary fill)
+  - **remove small islands** by minimum physical volume (mm³)
+  - **ROI auto-crop** around bone voxels
+  - **PCA axis alignment** for CAD-friendly orientation
+  - **mesh cleanup pipeline**: Laplacian smoothing, quadric decimation, normal/winding/hole repair
+  - **segmentation presets**: long_bone, skull, spine, cortical, metal
+  - **manifold/watertight validation report** in metadata
+  - **segmentation parameters JSON** exported with every STL
   - regenerate mesh without re-upload
 - 3D STL rendering in browser
 - plane cut on X/Y/Z

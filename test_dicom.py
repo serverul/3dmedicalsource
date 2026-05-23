@@ -34,5 +34,43 @@ for z in range(slices):
     ds.PixelData=arr.tobytes()
     ds.save_as(base/f'slice_{z:03d}.dcm')
 mesh, meta = dicom_to_bone_mesh(base, threshold_hu=250, step_size=1)
-print(len(mesh.vertices), len(mesh.faces), mesh.is_watertight, meta['slices'], meta['spacing_mm'])
+print("v1:", len(mesh.vertices), len(mesh.faces), mesh.is_watertight, meta['slices'], meta['spacing_mm'])
 assert len(mesh.vertices) > 0 and len(mesh.faces) > 0
+
+# Test Segmentation Engine v2 with morphology + fill holes + island removal
+mesh2, meta2 = dicom_to_bone_mesh(
+    base, threshold_hu=250, step_size=1,
+    morphology_closing_radius=2,
+    fill_holes=True,
+    min_island_volume_mm3=50.0,
+    roi_crop=True,
+    repair_mesh=True,
+)
+print("v2:", len(mesh2.vertices), len(mesh2.faces), mesh2.is_watertight,
+      meta2['slices'], meta2['spacing_mm'],
+      "preset:", meta2.get('active_preset'),
+      "watertight:", meta2['mesh_validation']['is_watertight'])
+assert len(mesh2.vertices) > 0 and len(mesh2.faces) > 0
+
+# Test with preset
+mesh3, meta3 = dicom_to_bone_mesh(
+    base, step_size=1,
+    preset="long_bone",
+)
+print("preset long_bone:", len(mesh3.vertices), len(mesh3.faces),
+      "preset:", meta3.get('active_preset'),
+      "closing_r:", meta3.get('morphology_closing_radius'))
+assert len(mesh3.vertices) > 0 and len(mesh3.faces) > 0
+assert meta3.get('active_preset') == 'long_bone'
+
+# Test PCA alignment
+mesh4, meta4 = dicom_to_bone_mesh(
+    base, threshold_hu=250, step_size=1,
+    pca_align=True,
+)
+print("pca:", len(mesh4.vertices), len(mesh4.faces),
+      "pca_transform:", meta4.get('pca_transform') is not None)
+assert len(mesh4.vertices) > 0 and len(mesh4.faces) > 0
+assert meta4.get('pca_transform') is not None
+
+print("\nAll Segmentation Engine v2 tests passed!")

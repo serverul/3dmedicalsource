@@ -1,6 +1,6 @@
 # Current State
 
-Last updated: 2026-05-23.
+Last updated: 2026-05-23 (Segmentation Engine v2).
 
 ## What has been built
 
@@ -64,12 +64,14 @@ Last updated: 2026-05-23.
 
 ## Known limitations
 
-- DICOM segmentation is still threshold-based plus basic cleanup.
+- DICOM segmentation is still threshold-based; morphology helps but is not AI/ML.
 - No 2D CT slice viewer yet; segmentation is mostly blind except for resulting 3D STL.
+- ROI crop adjusts mesh position — CAD operations after crop use the new origin.
+- PCA alignment changes mesh orientation; disable if original orientation matters.
+- Decimation is quadric — may lose fine detail on small anatomical features.
+- Mesh repair is best-effort; severely broken meshes may still fail watertight check.
 - `keep_largest` currently works best when HU max creates a binary mask path.
-- No ROI/crop UI yet.
 - No manual segmentation editing.
-- No robust mesh repair pipeline.
 - Conformal guide is approximate, not a true boolean negative mold.
 - Cutting guides/pads are not clinically validated.
 - No screw trajectory editor.

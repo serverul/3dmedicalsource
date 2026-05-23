@@ -42,6 +42,15 @@
     <div id="uploadStatus" class="status"><span class="pill warn">idle</span> Aștept mesh.</div>
 
     <h2>2. Segmentation workspace</h2>
+    <label>Preset anatomico</label>
+    <select id="segPreset" onchange="applyPresetUI()">
+      <option value="">Personalizzato (nessun preset)</option>
+      <option value="long_bone">Osso lungo (femore, tibia, omero)</option>
+      <option value="skull">Cranio / Maxillo-facciale</option>
+      <option value="spine">Colonna vertebrale</option>
+      <option value="cortical">Osso corticale denso</option>
+      <option value="metal">Con artefatti metallici</option>
+    </select>
     <label>Serie DICOM</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
     <div class="row">
       <div><label>HU min os</label><input id="segHuMin" type="number" step="25" value="250"></div>
@@ -52,6 +61,29 @@
       <div><label>Smooth</label><input id="segSmooth" type="number" step="1" value="2"></div>
       <div><label>Largest</label><select id="segLargest"><option value="true">Da</option><option value="false">Nu</option></select></div>
     </div>
+    <details>
+      <summary style="color:var(--muted);cursor:pointer;margin-top:10px;font-size:13px">⚙️ Segmentation Engine v2 — Morphology & Cleanup</summary>
+      <div class="row" style="margin-top:8px">
+        <div><label>Closing radius</label><input id="segMorphClose" type="number" step="1" min="0" max="10" value="0"></div>
+        <div><label>Opening radius</label><input id="segMorphOpen" type="number" step="1" min="0" max="10" value="0"></div>
+      </div>
+      <div class="row">
+        <div><label>Dilation radius</label><input id="segDilate" type="number" step="1" min="0" max="10" value="0"></div>
+        <div><label>Erosion radius</label><input id="segErode" type="number" step="1" min="0" max="10" value="0"></div>
+      </div>
+      <div class="row">
+        <div><label>Min island vol mm³</label><input id="segMinIsland" type="number" step="50" min="0" value="0"></div>
+        <div><label>Decimation faces (0=off)</label><input id="segDecimate" type="number" step="1000" min="0" value="0"></div>
+      </div>
+      <div class="row">
+        <div><label>Fill holes</label><select id="segFillHoles"><option value="true">Da</option><option value="false" selected>Nu</option></select></div>
+        <div><label>ROI crop</label><select id="segRoiCrop"><option value="true" selected>Da</option><option value="false">Nu</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>PCA align</label><select id="segPca"><option value="false" selected>Nu</option><option value="true">Da</option></select></div>
+        <div><label>Repair mesh</label><select id="segRepair"><option value="true" selected>Da</option><option value="false">Nu</option></select></div>
+      </div>
+    </details>
     <button id="regenBtn" onclick="regenerateMesh()" disabled>Regenerate bone mesh</button>
     <div id="segStatus" class="status"><span class="pill warn">idle</span> Segmentation neconfigurată.</div>
 
@@ -185,7 +217,18 @@ function populateSeries(meta){
   if(meta?.threshold_max_hu!==undefined && meta.threshold_max_hu!==null) $('segHuMax').value=meta.threshold_max_hu;
   if(meta?.step_size!==undefined) $('segStep').value=meta.step_size;
   if(meta?.smoothing_iterations!==undefined) $('segSmooth').value=meta.smoothing_iterations;
-  $('segStatus').innerHTML=`<span class="pill ok">series</span> ${meta?.slices||'?'} slices · HU ${Math.round(meta?.hu_min||0)}..${Math.round(meta?.hu_max||0)}`;
+  if(meta?.morphology_closing_radius!==undefined) $('segMorphClose').value=meta.morphology_closing_radius;
+  if(meta?.morphology_opening_radius!==undefined) $('segMorphOpen').value=meta.morphology_opening_radius;
+  if(meta?.fill_holes!==undefined) $('segFillHoles').value=meta.fill_holes?'true':'false';
+  if(meta?.min_island_volume_mm3!==undefined) $('segMinIsland').value=meta.min_island_volume_mm3;
+  if(meta?.roi_crop!==undefined) $('segRoiCrop').value=meta.roi_crop?'true':'false';
+  if(meta?.pca_align!==undefined) $('segPca').value=meta.pca_align?'true':'false';
+  if(meta?.active_preset) $('segPreset').value=meta.active_preset;
+  const mv=meta?.mesh_validation;
+  const wt=mv?.is_watertight;
+  const presetTag=meta?.active_preset?` · preset=${meta.active_preset}`:'';
+  const wtTag=wt!==undefined?` · WT=${wt}`:'';
+  $('segStatus').innerHTML=`<span class="pill ok">series</span> ${meta?.slices||'?'} slices · HU ${Math.round(meta?.hu_min||0)}..${Math.round(meta?.hu_max||0)}${presetTag}${wtTag}`;
 }
 window.uploadMesh=async()=>{
   const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Alege un STL/OBJ/PLY.'); return}
@@ -199,6 +242,20 @@ window.uploadDicom=async()=>{
   fd.append('file',f);
   fd.append('threshold_hu',$('dicomThreshold').value || '250');
   fd.append('step_size',$('dicomStep').value || '1');
+  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
+  fd.append('keep_largest',$('segLargest').value);
+  fd.append('smoothing_iterations',$('segSmooth').value||'2');
+  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
+  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
+  fd.append('dilation_radius',$('segDilate').value||'0');
+  fd.append('erosion_radius',$('segErode').value||'0');
+  fd.append('fill_holes',$('segFillHoles').value);
+  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
+  fd.append('roi_crop',$('segRoiCrop').value);
+  fd.append('pca_align',$('segPca').value);
+  fd.append('decimation_target_faces',$('segDecimate').value||'0');
+  fd.append('repair_mesh',$('segRepair').value);
+  fd.append('preset',$('segPreset').value||'');
   $('uploadStatus').innerHTML='<span class="pill warn">dicom</span> Procesez DICOM → STL. Poate dura...';
   const r=await fetch('/api/upload-dicom',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM conversion failed');return}
@@ -215,6 +272,20 @@ window.uploadDicomFolder=async()=>{
   for(const f of files){ fd.append('files', f, f.webkitRelativePath || f.name); }
   fd.append('threshold_hu',$('dicomThreshold').value || '250');
   fd.append('step_size',$('dicomStep').value || '1');
+  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
+  fd.append('keep_largest',$('segLargest').value);
+  fd.append('smoothing_iterations',$('segSmooth').value||'2');
+  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
+  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
+  fd.append('dilation_radius',$('segDilate').value||'0');
+  fd.append('erosion_radius',$('segErode').value||'0');
+  fd.append('fill_holes',$('segFillHoles').value);
+  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
+  fd.append('roi_crop',$('segRoiCrop').value);
+  fd.append('pca_align',$('segPca').value);
+  fd.append('decimation_target_faces',$('segDecimate').value||'0');
+  fd.append('repair_mesh',$('segRepair').value);
+  fd.append('preset',$('segPreset').value||'');
   $('uploadStatus').innerHTML=`<span class="pill warn">folder</span> Procesez ${files.length} fișiere DICOM → STL. Poate dura...`;
   const r=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM folder conversion failed');return}
@@ -239,6 +310,27 @@ window.loadSample=async()=>{
   $('uploadStatus').innerHTML='<span class="pill warn">sample</span> Generez os demo...'; const r=await fetch('/api/sample',{method:'POST'}); const j=await r.json();
   caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Os demo încărcat: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
 };
+window.applyPresetUI=()=>{
+  const p=$('segPreset').value;
+  const presets={
+    long_bone:{threshold_hu:250,threshold_max_hu:3000,closing:2,opening:0,fill_holes:true,min_island:500},
+    skull:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:200},
+    spine:{threshold_hu:220,threshold_max_hu:3000,closing:2,opening:1,fill_holes:true,min_island:100},
+    cortical:{threshold_hu:400,threshold_max_hu:3000,closing:1,opening:0,fill_holes:true,min_island:300},
+    metal:{threshold_hu:200,threshold_max_hu:8000,closing:3,opening:2,fill_holes:true,min_island:500},
+  };
+  if(!p||!presets[p])return;
+  const c=presets[p];
+  $('segHuMin').value=c.threshold_hu;
+  $('segHuMax').value=c.threshold_max_hu;
+  $('segMorphClose').value=c.closing;
+  $('segMorphOpen').value=c.opening;
+  $('segFillHoles').value=c.fill_holes?'true':'false';
+  $('segMinIsland').value=c.min_island;
+};
+
+};
+
 window.regenerateMesh=async()=>{
   if(!caseId){setStatus('segStatus',false,'Încarcă un CT întâi.'); return}
   $('segStatus').innerHTML='<span class="pill warn">working</span> Regenerare mesh os...';
@@ -249,10 +341,23 @@ window.regenerateMesh=async()=>{
   fd.append('series_uid',$('seriesSelect').value||'');
   fd.append('keep_largest',$('segLargest').value);
   fd.append('smoothing_iterations',$('segSmooth').value||'2');
+  // Segmentation Engine v2 params
+  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
+  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
+  fd.append('dilation_radius',$('segDilate').value||'0');
+  fd.append('erosion_radius',$('segErode').value||'0');
+  fd.append('fill_holes',$('segFillHoles').value);
+  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
+  fd.append('roi_crop',$('segRoiCrop').value);
+  fd.append('pca_align',$('segPca').value);
+  fd.append('decimation_target_faces',$('segDecimate').value||'0');
+  fd.append('repair_mesh',$('segRepair').value);
+  fd.append('preset',$('segPreset').value||'');
   const r=await fetch(`/api/cases/${caseId}/regenerate-mesh`,{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('segStatus',false,j.detail||'regenerate failed');return}
   populateSeries(j.dicom);
-  setStatus('segStatus',true,`Mesh regenerat: ${j.info.vertices} vertices / ${j.info.faces} faces`);
+  const mv=j.dicom?.mesh_validation;
+  setStatus('segStatus',true,`Mesh: ${j.info.vertices}v/${j.info.faces}f${mv?', watertight='+mv.is_watertight:''}${j.dicom?.active_preset?', preset='+j.dicom.active_preset:''}`);
   $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
   clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xd8e7ff,1);
 };
