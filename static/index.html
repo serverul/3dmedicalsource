@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <title>3DMedicalPlanner</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#e0e0e0;overflow:hidden;height:100vh}
@@ -20,7 +20,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .section button:hover{background:#3a7a4a}
 .section button.active{background:#1a5a8a;border-color:#2a7aba}
 .section button.danger{background:#5a2a2a;border-color:#7a3a3a}
-.section button.danger:hover{background:#7a3a3a}
 .section-row{display:flex;gap:6px}
 .section-row>*{flex:1}
 
@@ -50,15 +49,23 @@ canvas{display:block}
 #toolbar button:hover{background:#2a2a3a}
 #toolbar button.active{background:#1a3a5a;color:#4a9aff;border-color:#4a9aff}
 
-/* Plane controls */
-#plane-controls{position:absolute;top:60px;right:12px;background:rgba(20,20,30,0.9);padding:12px;border-radius:6px;border:1px solid #333;z-index:10;width:240px;font-size:12px}
-#plane-controls label{display:block;color:#888;font-size:10px;margin-bottom:2px;margin-top:6px}
-#plane-controls input[type=range]{width:100%;margin-bottom:4px}
-#plane-controls .val{color:#4a9aff;font-size:11px}
-#plane-controls.hidden{display:none}
+/* Shape controls panel */
+#shape-panel{position:absolute;top:60px;right:12px;background:rgba(20,20,30,0.95);padding:12px;border-radius:6px;border:1px solid #333;z-index:10;width:260px;font-size:12px}
+#shape-panel.hidden{display:none}
+#shape-panel h3{font-size:12px;color:#4a9aff;margin-bottom:8px}
+#shape-panel label{display:block;color:#888;font-size:10px;margin-bottom:2px;margin-top:6px}
+#shape-panel input[type=range]{width:100%;margin-bottom:4px}
+#shape-panel .val{color:#4a9aff;font-size:11px}
+#shape-panel .param-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+#shape-panel .param-row label{flex:1;margin:0}
+#shape-panel .param-row input{width:80px;margin:0}
+
+/* Measurements overlay */
+#measurements{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.9);padding:8px 16px;border-radius:6px;border:1px solid #333;font-size:12px;z-index:10;white-space:nowrap}
+#measurements.hidden{display:none}
 
 /* Hotkeys */
-#hotkeys{position:absolute;bottom:12px;right:12px;background:rgba(20,20,30,0.85);padding:8px 12px;border-radius:6px;border:1px solid #333;font-size:10px;color:#666;z-index:10;max-width:240px}
+#hotkeys{position:absolute;bottom:12px;right:12px;background:rgba(20,20,30,0.85);padding:8px 12px;border-radius:6px;border:1px solid #333;font-size:10px;color:#666;z-index:10;max-width:260px}
 #hotkeys kbd{background:#2a2a3a;padding:1px 4px;border-radius:3px;color:#aaa}
 
 /* Loading */
@@ -66,11 +73,6 @@ canvas{display:block}
 #loading.hidden{display:none}
 .spinner{width:40px;height:40px;border:3px solid #333;border-top-color:#4a9aff;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px}
 @keyframes spin{to{transform:rotate(360deg)}}
-#load-progress{margin-top:8px;font-size:12px;color:#666}
-
-/* Point markers info */
-#points-info{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.9);padding:8px 16px;border-radius:6px;border:1px solid #333;font-size:12px;z-index:10}
-#points-info.hidden{display:none}
 </style>
 </head>
 <body>
@@ -93,17 +95,18 @@ canvas{display:block}
       </div>
     </div>
 
-    <!-- Tools -->
+    <!-- Cutting Tools (JMesh-inspired) -->
     <div class="section">
-      <label>Planning Tools</label>
+      <label>Cutting Tools</label>
       <div class="tool-group">
         <div class="tool-btn active" data-tool="select" onclick="setTool('select')">🎯 Select</div>
-        <div class="tool-btn" data-tool="place-points" onclick="setTool('place-points')">📍 Place Points</div>
-        <div class="tool-btn" data-tool="define-plane" onclick="setTool('define-plane')">📐 Define Plane</div>
+        <div class="tool-btn" data-tool="rect-cut" onclick="setTool('rect-cut')">▭ Rectangle Cut</div>
+        <div class="tool-btn" data-tool="circle-cut" onclick="setTool('circle-cut')">◯ Circle Cut</div>
+        <div class="tool-btn" data-tool="line-cut" onclick="setTool('line-cut')">╱ Line Cut</div>
       </div>
       <div class="tool-group">
-        <div class="tool-btn" onclick="executeCut()" style="background:#2a3a2a;color:#6f6">✂️ Cut Bone</div>
-        <div class="tool-btn" onclick="clearPlane()">🗑 Clear Plane</div>
+        <div class="tool-btn" onclick="executeSlice()" style="background:#2a3a2a;color:#6f6">✂️ Slice Bone</div>
+        <div class="tool-btn" onclick="clearShape()">🗑 Clear Shape</div>
       </div>
     </div>
 
@@ -122,54 +125,65 @@ canvas{display:block}
     </div>
 
     <!-- Objects -->
-    <div class="section">
-      <label>Objects</label>
-    </div>
+    <div class="section"><label>Objects</label></div>
     <div id="bone-list"></div>
-
-    <div id="status">
-      <span id="status-text">Ready</span>
-      <span id="obj-count"></span>
-    </div>
+    <div id="status"><span id="status-text">Ready</span><span id="obj-count"></span></div>
   </div>
 
   <!-- 3D Viewer -->
   <div id="viewer">
     <div id="toolbar">
-      <button id="btn-translate" class="active" onclick="setGizmo('translate')" title="Move (G)">✥ Move</button>
-      <button id="btn-rotate" onclick="setGizmo('rotate')" title="Rotate (R)">↻ Rotate</button>
-      <button id="btn-scale" onclick="setGizmo('scale')" title="Scale (S)">⤡ Scale</button>
-      <button onclick="duplicateSelected()" title="Clone (Ctrl+D)">⧉ Clone</button>
-      <button onclick="mirrorSelected()" title="Mirror (M)">↔ Mirror</button>
+      <button id="btn-translate" class="active" onclick="setGizmo('translate')">✥ Move</button>
+      <button id="btn-rotate" onclick="setGizmo('rotate')">↻ Rotate</button>
+      <button onclick="duplicateSelected()">⧉ Clone</button>
+      <button onclick="mirrorSelected()">↔ Mirror</button>
     </div>
 
-    <!-- Plane adjustment controls -->
-    <div id="plane-controls" class="hidden">
-      <div style="font-weight:600;color:#aaa;margin-bottom:4px">📐 Cutting Plane</div>
-      <label>Tilt X (sagittal) <span class="val" id="tilt-x-val">0°</span></label>
-      <input type="range" id="tilt-x" min="-90" max="90" value="0" oninput="updatePlane()">
-      <label>Tilt Y (coronal) <span class="val" id="tilt-y-val">0°</span></label>
-      <input type="range" id="tilt-y" min="-90" max="90" value="0" oninput="updatePlane()">
-      <label>Tilt Z (axial) <span class="val" id="tilt-z-val">0°</span></label>
-      <input type="range" id="tilt-z" min="-90" max="90" value="0" oninput="updatePlane()">
-      <label>Offset along normal <span class="val" id="offset-val">0</span></label>
-      <input type="range" id="plane-offset" min="-100" max="100" value="0" oninput="updatePlane()">
+    <!-- Shape parameters panel -->
+    <div id="shape-panel" class="hidden">
+      <h3 id="shape-title">▭ Rectangle Cut</h3>
+      <div class="param-row">
+        <label>Width</label>
+        <input type="range" id="shape-width" min="10" max="200" value="60" oninput="updateShapeParam()">
+        <span class="val" id="shape-width-val">60</span>
+      </div>
+      <div class="param-row">
+        <label>Height</label>
+        <input type="range" id="shape-height" min="10" max="200" value="40" oninput="updateShapeParam()">
+        <span class="val" id="shape-height-val">40</span>
+      </div>
+      <div class="param-row">
+        <label>Radius</label>
+        <input type="range" id="shape-radius" min="5" max="200" value="30" oninput="updateShapeParam()">
+        <span class="val" id="shape-radius-val">30</span>
+      </div>
+      <div class="param-row">
+        <label>Extrude depth</label>
+        <input type="range" id="shape-depth" min="1" max="100" value="50" oninput="updateShapeParam()">
+        <span class="val" id="shape-depth-val">50</span>
+      </div>
+      <div class="param-row">
+        <label>Snap offset</label>
+        <input type="range" id="snap-offset" min="-10" max="10" value="0" step="0.5" oninput="updateShapeParam()">
+        <span class="val" id="snap-offset-val">0</span>
+      </div>
       <div style="margin-top:8px;display:flex;gap:4px">
-        <button onclick="executeCut()" style="flex:1;background:#2a3a2a;color:#6f6;font-size:11px;padding:6px;border:1px solid #3a5a3a;border-radius:4px;cursor:pointer">✂️ Execute Cut</button>
-        <button onclick="clearPlane()" style="flex:1;background:#3a2a2a;color:#f66;font-size:11px;padding:6px;border:1px solid #5a3a3a;border-radius:4px;cursor:pointer">Clear</button>
+        <button onclick="executeSlice()" style="flex:1;background:#2a3a2a;color:#6f6;font-size:11px;padding:6px;border:1px solid #3a5a3a;border-radius:4px;cursor:pointer">✂️ Execute Slice</button>
+        <button onclick="clearShape()" style="flex:1;background:#3a2a2a;color:#f66;font-size:11px;padding:6px;border:1px solid #5a3a3a;border-radius:4px;cursor:pointer">Clear</button>
       </div>
     </div>
 
-    <div id="hotkeys">
-      <kbd>1</kbd> Select &nbsp; <kbd>2</kbd> Place Points &nbsp; <kbd>3</kbd> Define Plane<br>
-      <kbd>G</kbd> Move &nbsp; <kbd>R</kbd> Rotate &nbsp; <kbd>S</kbd> Scale<br>
-      <kbd>Del</kbd> Delete &nbsp; <kbd>H</kbd> Hide &nbsp; <kbd>J</kbd> Transparent<br>
-      <kbd>Ctrl+D</kbd> Clone &nbsp; <kbd>M</kbd> Mirror &nbsp; <kbd>F</kbd> Focus<br>
-      <kbd>Esc</kbd> Deselect &nbsp; <kbd>Enter</kbd> Execute Cut
+    <!-- Measurements -->
+    <div id="measurements" class="hidden">
+      <span id="measure-text"></span>
     </div>
 
-    <div id="points-info" class="hidden">
-      <span id="points-count">0</span>/2 points placed — <span id="points-hint">click on bone surface</span>
+    <div id="hotkeys">
+      <kbd>1</kbd> Select &nbsp; <kbd>2</kbd> Rect &nbsp; <kbd>3</kbd> Circle &nbsp; <kbd>4</kbd> Line<br>
+      <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
+      <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
+      <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
+      <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus
     </div>
 
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
@@ -182,676 +196,550 @@ canvas{display:block}
 
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {TransformControls} from 'three/addons/controls/TransformControls.js';
 
-// ============================================================
-//  SCENE
-// ============================================================
-const container = document.getElementById('viewer');
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0a12);
-
-const camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 5000);
-camera.position.set(0, 50, 200);
-
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.localClippingEnabled = true;
+// ============ SCENE ============
+const container=document.getElementById('viewer');
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0a0a12);
+const camera=new THREE.PerspectiveCamera(50,container.clientWidth/container.clientHeight,0.1,5000);
+camera.position.set(0,50,200);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(container.clientWidth,container.clientHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.2;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.localClippingEnabled=true;
 container.appendChild(renderer.domElement);
 
-// Lights
-scene.add(new THREE.AmbientLight(0x404050, 0.6));
-scene.add(new THREE.HemisphereLight(0x8899bb, 0x443322, 0.5));
-const dl1 = new THREE.DirectionalLight(0xffeedd, 1.2);
-dl1.position.set(100,200,150); scene.add(dl1);
-const dl2 = new THREE.DirectionalLight(0xddddff, 0.6);
-dl2.position.set(-100,-50,-100); scene.add(dl2);
+scene.add(new THREE.AmbientLight(0x404050,0.6));
+scene.add(new THREE.HemisphereLight(0x8899bb,0x443322,0.5));
+const dl1=new THREE.DirectionalLight(0xffeedd,1.2);dl1.position.set(100,200,150);scene.add(dl1);
+const dl2=new THREE.DirectionalLight(0xddddff,0.6);dl2.position.set(-100,-50,-100);scene.add(dl2);
+scene.add(new THREE.GridHelper(400,40,0x222233,0x16161e));
 
-scene.add(new THREE.GridHelper(400, 40, 0x222233, 0x16161e));
-
-// ============================================================
-//  CONTROLS
-// ============================================================
-const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.enableDamping = true; orbit.dampingFactor = 0.08;
-
-const gizmo = new TransformControls(camera, renderer.domElement);
-gizmo.setMode('translate'); gizmo.setSize(0.8);
+// ============ CONTROLS ============
+const orbit=new OrbitControls(camera,renderer.domElement);
+orbit.enableDamping=true;orbit.dampingFactor=0.08;
+const gizmo=new TransformControls(camera,renderer.domElement);
+gizmo.setMode('translate');gizmo.setSize(0.8);
 scene.add(gizmo);
-gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; });
-gizmo.addEventListener('objectChange', () => {
-  if (selectedIdx >= 0 && selectedIdx < objects.length) {
-    const o = objects[selectedIdx];
-    document.getElementById('tx').value = Math.round(o.mesh.position.x - o.origPos.x);
-    document.getElementById('ty').value = Math.round(o.mesh.position.y - o.origPos.y);
-    document.getElementById('tz').value = Math.round(o.mesh.position.z - o.origPos.z);
+gizmo.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value});
+gizmo.addEventListener('objectChange',()=>{
+  if(selectedIdx>=0&&selectedIdx<objects.length){
+    const o=objects[selectedIdx];
+    document.getElementById('tx').value=Math.round(o.mesh.position.x-o.origPos.x);
+    document.getElementById('ty').value=Math.round(o.mesh.position.y-o.origPos.y);
+    document.getElementById('tz').value=Math.round(o.mesh.position.z-o.origPos.z);
   }
 });
 
-// Raycaster
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+const raycaster=new THREE.Raycaster();
+const mouse=new THREE.Vector2();
 
-// ============================================================
-//  STATE
-// ============================================================
-const COLORS = [0xE8D5B7,0xD4C4A8,0xC9B896,0xBFA87A,0xB59868,0xF5E6D0,0xDBC8AA,0xC4B08C,0xAD9870,0x9A8460,0xE0CDB0,0xCCC09A,0xB8A880,0xA49068,0x907850];
+// ============ STATE ============
+const COLORS=[0xE8D5B7,0xD4C4A8,0xC9B896,0xBFA87A,0xB59868,0xF5E6D0,0xDBC8AA,0xC4B08C,0xAD9870,0x9A8460];
+let objects=[];
+let selectedIdx=-1;
+let currentTool='select';
+let caseId=null;
 
-let objects = [];      // {mesh, name, color, origPos, visible, transparent, caseId, boneIndex}
-let selectedIdx = -1;
-let currentTool = 'select';
-let caseId = null;
-let placedPoints = [];  // THREE.Vector3[]
-let pointMarkers = [];  // THREE.Mesh[]
-let cuttingPlane = null; // {origin, normal, tiltX, tiltY, tiltZ, offset}
-let planeMesh = null;    // THREE.Mesh visualization
-let planeHelperLine = null;
+// Shape state (JMesh-inspired)
+let activeShape=null; // THREE.Mesh - the cutting plane visualization
+let shapeType='rect'; // rect|circle|line
+let shapeOrigin=null; // Vector3 - center of shape on bone surface
+let shapeNormal=null; // Vector3 - surface normal at click point
+let shapePoints=[]; // Vector3[] - for line tool
+let isMovingShape=false;
+let isRotatingShape=false;
+let isExtrudingShape=false;
+let extrudeDepth=50;
+let moveAxis=null; // 'X','Y','Z',null
 
-// ============================================================
-//  TOOL MANAGEMENT
-// ============================================================
-window.setTool = function(tool) {
-  currentTool = tool;
-  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => {
-    b.classList.toggle('active', b.dataset.tool === tool);
+// ============ TOOL MANAGEMENT ============
+window.setTool=function(tool){
+  currentTool=tool;
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b=>{
+    b.classList.toggle('active',b.dataset.tool===tool);
   });
-  // Clear points if switching away
-  if (tool !== 'place-points') {
-    // keep points if plane is defined
+  if(tool==='rect-cut'||tool==='circle-cut'||tool==='line-cut'){
+    shapeType=tool.replace('-cut','');
+    clearShape();
+    document.getElementById('shape-panel').classList.remove('hidden');
+    document.getElementById('measurements').classList.remove('hidden');
+    // Show relevant params
+    document.getElementById('shape-width').parentElement.style.display=shapeType==='rect'?'flex':'none';
+    document.getElementById('shape-height').parentElement.style.display=shapeType==='rect'?'flex':'none';
+    document.getElementById('shape-radius').parentElement.style.display=shapeType==='circle'?'flex':'none';
+    document.getElementById('shape-title').textContent=
+      shapeType==='rect'?'▭ Rectangle Cut':shapeType==='circle'?'◯ Circle Cut':'╱ Line Cut';
+    setStatus('Click on bone surface to place cutting shape');
+  } else {
+    document.getElementById('shape-panel').classList.add('hidden');
+    document.getElementById('measurements').classList.add('hidden');
   }
-  if (tool === 'define-plane') {
-    if (placedPoints.length >= 2) {
-      buildPlaneFromPoints();
-    } else {
-      setStatus('Place 2 points first (use Place Points tool)');
-      setTool('place-points');
+};
+
+// ============ CLICK HANDLER ============
+container.addEventListener('click',e=>{
+  if(gizmo.dragging)return;
+  const rect=renderer.domElement.getBoundingClientRect();
+  mouse.x=((e.clientX-rect.left)/rect.width)*2-1;
+  mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(mouse,camera);
+
+  if(currentTool==='select'){
+    const meshes=objects.map(o=>o.mesh);
+    const hits=raycaster.intersectObjects(meshes,false);
+    if(hits.length>0){
+      const idx=objects.findIndex(o=>o.mesh===hits[0].object);
+      if(idx>=0)selectObject(idx);
+    } else deselectAll();
+  } else if(currentTool==='rect-cut'||currentTool==='circle-cut'||currentTool==='line-cut'){
+    handleShapeClick();
+  }
+});
+
+// ============ SHAPE CREATION (JMesh snap-to-surface) ============
+function handleShapeClick(){
+  const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+
+  const hit=hits[0];
+  const point=hit.point.clone();
+  const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+  const offset=parseFloat(document.getElementById('snap-offset').value)||0;
+  const origin=point.clone().add(normal.clone().multiplyScalar(offset));
+
+  shapeOrigin=origin;
+  shapeNormal=normal;
+
+  createShapeVisual();
+  setStatus('Shape placed — adjust size with sliders, then Slice');
+}
+
+function createShapeVisual(){
+  clearShapeVisual();
+  const w=parseFloat(document.getElementById('shape-width').value)||60;
+  const h=parseFloat(document.getElementById('shape-height').value)||40;
+  const r=parseFloat(document.getElementById('shape-radius').value)||30;
+  extrudeDepth=parseFloat(document.getElementById('shape-depth').value)||50;
+
+  let geo;
+  if(shapeType==='rect'){
+    geo=new THREE.PlaneGeometry(w,h);
+  } else if(shapeType==='circle'){
+    geo=new THREE.CircleGeometry(r,32);
+  } else {
+    // Line: thin rectangle
+    geo=new THREE.PlaneGeometry(w,2);
+  }
+
+  const mat=new THREE.MeshBasicMaterial({
+    color:0xff4444,transparent:true,opacity:0.25,
+    side:THREE.DoubleSide,depthWrite:false
+  });
+  activeShape=new THREE.Mesh(geo,mat);
+  activeShape.position.copy(shapeOrigin);
+
+  // Orient shape to face the surface normal
+  const up=new THREE.Vector3(0,0,1);
+  const quat=new THREE.Quaternion().setFromUnitVectors(up,shapeNormal);
+  activeShape.quaternion.copy(quat);
+
+  // Add wireframe outline
+  const edges=new THREE.EdgesGeometry(geo);
+  const lineMat=new THREE.LineBasicMaterial({color:0xff6666,linewidth:2});
+  const wireframe=new THREE.LineSegments(edges,lineMat);
+  activeShape.add(wireframe);
+
+  // Add extrusion volume (transparent box showing the cut depth)
+  const depthGeo=new THREE.BoxGeometry(
+    shapeType==='rect'?w:2*r,
+    shapeType==='rect'?h:2*r,
+    extrudeDepth
+  );
+  const depthMat=new THREE.MeshBasicMaterial({
+    color:0xff4444,transparent:true,opacity:0.08,
+    side:THREE.DoubleSide,depthWrite:false
+  });
+  const depthMesh=new THREE.Mesh(depthGeo,depthMat);
+  depthMesh.position.z=-extrudeDepth/2;
+  activeShape.add(depthMesh);
+
+  // Add normal direction arrow
+  const arrowDir=shapeNormal.clone().normalize();
+  const arrowOrigin=shapeOrigin.clone();
+  const arrow=new THREE.ArrowHelper(arrowDir,arrowOrigin,30,0xff0000,8,4);
+  scene.add(arrow);
+  activeShape.userData.arrow=arrow;
+
+  scene.add(activeShape);
+  updateMeasurements();
+}
+
+function clearShapeVisual(){
+  if(activeShape){
+    if(activeShape.userData.arrow)scene.remove(activeShape.userData.arrow);
+    scene.remove(activeShape);
+    if(activeShape.geometry)activeShape.geometry.dispose();
+    if(activeShape.material)activeShape.material.dispose();
+    activeShape=null;
+  }
+}
+
+window.clearShape=function(){
+  clearShapeVisual();
+  shapeOrigin=null;
+  shapeNormal=null;
+  shapePoints=[];
+  document.getElementById('measurements').classList.add('hidden');
+  setStatus('Shape cleared');
+};
+
+// ============ SHAPE PARAMETER UPDATE ============
+window.updateShapeParam=function(){
+  document.getElementById('shape-width-val').textContent=document.getElementById('shape-width').value;
+  document.getElementById('shape-height-val').textContent=document.getElementById('shape-height').value;
+  document.getElementById('shape-radius-val').textContent=document.getElementById('shape-radius').value;
+  document.getElementById('shape-depth-val').textContent=document.getElementById('shape-depth').value;
+  document.getElementById('snap-offset-val').textContent=document.getElementById('snap-offset').value;
+  extrudeDepth=parseFloat(document.getElementById('shape-depth').value)||50;
+  if(activeShape&&shapeOrigin)createShapeVisual();
+  updateMeasurements();
+};
+
+function updateMeasurements(){
+  const el=document.getElementById('measurements');
+  const text=document.getElementById('measure-text');
+  if(!activeShape||!shapeOrigin){el.classList.add('hidden');return;}
+  el.classList.remove('hidden');
+  const w=parseFloat(document.getElementById('shape-width').value)||60;
+  const h=parseFloat(document.getElementById('shape-height').value)||40;
+  const r=parseFloat(document.getElementById('shape-radius').value)||30;
+  const d=extrudeDepth;
+  if(shapeType==='rect'){
+    text.textContent=`Width: ${w}mm | Height: ${h}mm | Depth: ${d}mm`;
+  } else if(shapeType==='circle'){
+    text.textContent=`Radius: ${r}mm | Depth: ${d}mm`;
+  } else {
+    text.textContent=`Length: ${w}mm | Depth: ${d}mm`;
+  }
+}
+
+// ============ SHAPE TRANSFORM (G/R/E like JMesh) ============
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+
+  // Shape-specific keys
+  if(activeShape&&shapeOrigin){
+    if(e.key==='g'||e.key==='G'){isMovingShape=!isMovingShape;isRotatingShape=false;isExtrudingShape=false;
+      setStatus(isMovingShape?'Moving shape — click to place, or use axis keys (X/Y/Z)':'Shape locked');return;}
+    if(e.key==='r'||e.key==='R'){isRotatingShape=!isRotatingShape;isMovingShape=false;isExtrudingShape=false;
+      setStatus(isRotatingShape?'Rotating shape — use mouse wheel or arrow keys':'Shape locked');return;}
+    if(e.key==='e'||e.key==='E'){isExtrudingShape=!isExtrudingShape;isMovingShape=false;isRotatingShape=false;
+      setStatus(isExtrudingShape?'Extruding — use ↑↓ arrows':'Shape locked');return;}
+    if(isMovingShape){
+      if(e.key==='x'||e.key==='X'){moveAxis='X';setStatus('Moving along X');return;}
+      if(e.key==='y'||e.key==='Y'){moveAxis='Y';setStatus('Moving along Y');return;}
+      if(e.key==='z'||e.key==='Z'){moveAxis='Z';setStatus('Moving along Z');return;}
+      if(e.key==='n'||e.key==='N'){moveAxis=null;setStatus('Moving (free)');return;}
+    }
+    if(isExtrudingShape){
+      if(e.key==='ArrowUp'){extrudeDepth=Math.min(200,extrudeDepth+5);
+        document.getElementById('shape-depth').value=extrudeDepth;
+        document.getElementById('shape-depth-val').textContent=extrudeDepth;
+        createShapeVisual();updateMeasurements();return;}
+      if(e.key==='ArrowDown'){extrudeDepth=Math.max(1,extrudeDepth-5);
+        document.getElementById('shape-depth').value=extrudeDepth;
+        document.getElementById('shape-depth-val').textContent=extrudeDepth;
+        createShapeVisual();updateMeasurements();return;}
+    }
+    if(isRotatingShape){
+      if(e.key==='ArrowUp'){rotateShape(15);return;}
+      if(e.key==='ArrowDown'){rotateShape(-15);return;}
+      if(e.key==='ArrowLeft'){rotateShape(15,'y');return;}
+      if(e.key==='ArrowRight'){rotateShape(-15,'y');return;}
     }
   }
-  if (tool === 'place-points') {
-    clearPlacedPoints();
-    document.getElementById('points-info').classList.remove('hidden');
-    setStatus('Click on bone surface to place points');
-  } else {
-    document.getElementById('points-info').classList.add('hidden');
-  }
-};
 
-// ============================================================
-//  CLICK HANDLER — tool-dependent
-// ============================================================
-container.addEventListener('click', (event) => {
-  if (gizmo.dragging) return;
-  const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-
-  if (currentTool === 'select') {
-    handleSelectClick();
-  } else if (currentTool === 'place-points') {
-    handlePlacePointClick();
+  // Global keys
+  switch(e.key){
+    case '1':setTool('select');break;
+    case '2':setTool('rect-cut');break;
+    case '3':setTool('circle-cut');break;
+    case '4':setTool('line-cut');break;
+    case 'g':case 'G':setGizmo('translate');break;
+    case 'Enter':executeSlice();break;
+    case 'Escape':if(activeShape){clearShape();}else{deselectAll();}break;
+    case 'Delete':case 'Backspace':deleteSelected();e.preventDefault();break;
+    case 'f':case 'F':if(selectedIdx>=0){orbit.target.copy(objects[selectedIdx].mesh.position);}break;
+    case 'd':if(e.ctrlKey||e.metaKey){duplicateSelected();e.preventDefault();}break;
+    case 'm':case 'M':mirrorSelected();break;
   }
 });
 
-function handleSelectClick() {
-  const meshes = objects.map(o => o.mesh);
-  const hits = raycaster.intersectObjects(meshes, false);
-  if (hits.length > 0) {
-    const idx = objects.findIndex(o => o.mesh === hits[0].object);
-    if (idx >= 0) selectObject(idx);
+// Mouse move for shape manipulation
+container.addEventListener('mousemove',e=>{
+  if(!activeShape||!shapeOrigin)return;
+  if(isMovingShape){
+    const rect=renderer.domElement.getBoundingClientRect();
+    mouse.x=((e.clientX-rect.left)/rect.width)*2-1;
+    mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera(mouse,camera);
+
+    // Project mouse onto the shape's plane
+    const plane=new THREE.Plane(shapeNormal.clone(),-shapeOrigin.dot(shapeNormal));
+    const target=new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane,target);
+    if(target){
+      if(moveAxis==='X'){shapeOrigin.x=target.x;}
+      else if(moveAxis==='Y'){shapeOrigin.y=target.y;}
+      else if(moveAxis==='Z'){shapeOrigin.z=target.z;}
+      else{shapeOrigin.copy(target);}
+      createShapeVisual();
+    }
+  }
+});
+
+// Mouse wheel for rotation
+container.addEventListener('wheel',e=>{
+  if(!activeShape||!isRotatingShape)return;
+  e.preventDefault();
+  rotateShape(e.deltaY>0?15:-15);
+},{passive:false});
+
+function rotateShape(deg,axis){
+  if(!activeShape)return;
+  const rad=THREE.MathUtils.degToRad(deg);
+  if(axis==='y'){
+    activeShape.rotateOnWorldAxis(shapeNormal.clone().normalize(),rad);
   } else {
-    deselectAll();
+    // Get a perpendicular axis
+    const perp=new THREE.Vector3(1,0,0);
+    if(Math.abs(shapeNormal.dot(perp))>0.9)perp.set(0,1,0);
+    const rotAxis=perp.cross(shapeNormal).normalize();
+    activeShape.rotateOnWorldAxis(rotAxis,rad);
+    shapeNormal.applyAxisAngle(rotAxis,rad).normalize();
+    if(activeShape.userData.arrow){
+      activeShape.userData.arrow.setDirection(shapeNormal.clone().normalize());
+    }
   }
 }
 
-function handlePlacePointClick() {
-  // Intersect with all bone meshes
-  const meshes = objects.map(o => o.mesh);
-  const hits = raycaster.intersectObjects(meshes, false);
-  if (hits.length === 0) return;
-
-  const point = hits[0].point.clone();
-  placedPoints.push(point);
-
-  // Add visual marker (small sphere)
-  const markerGeo = new THREE.SphereGeometry(2, 16, 16);
-  const markerMat = new THREE.MeshBasicMaterial({color: 0xff4444});
-  const marker = new THREE.Mesh(markerGeo, markerMat);
-  marker.position.copy(point);
-  scene.add(marker);
-  pointMarkers.push(marker);
-
-  // Update UI
-  document.getElementById('points-count').textContent = placedPoints.length;
-  if (placedPoints.length >= 2) {
-    document.getElementById('points-hint').textContent = 'press 3 or click Define Plane';
-    setStatus('2 points placed — switch to Define Plane (press 3)');
-  } else {
-    document.getElementById('points-hint').textContent = 'click on bone surface';
+// ============ EXECUTE SLICE (Boolean Slice like JMesh) ============
+window.executeSlice=async function(){
+  if(!activeShape||!shapeOrigin||!shapeNormal){
+    setStatus('Place a cutting shape first (tools 2-4)');
+    return;
   }
-}
+  if(selectedIdx<0){setStatus('Select a bone first');return;}
 
-function clearPlacedPoints() {
-  placedPoints = [];
-  pointMarkers.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
-  pointMarkers = [];
-  document.getElementById('points-count').textContent = '0';
-  document.getElementById('points-hint').textContent = 'click on bone surface';
-}
-
-// ============================================================
-//  PLANE DEFINITION
-// ============================================================
-function buildPlaneFromPoints() {
-  if (placedPoints.length < 2) { setStatus('Need 2 points'); return; }
-
-  const p1 = placedPoints[0];
-  const p2 = placedPoints[1];
-  const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
-
-  // Compute normal: perpendicular to p1-p2 line, using the "up" direction as reference
-  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
-  const up = new THREE.Vector3(0, 1, 0);
-  let normal = new THREE.Vector3().crossVectors(dir, up).normalize();
-  if (normal.length() < 0.01) {
-    normal = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, 1)).normalize();
-  }
-
-  cuttingPlane = {
-    origin: center.clone(),
-    baseNormal: normal.clone(),
-    normal: normal.clone(),
-    tiltX: 0, tiltY: 0, tiltZ: 0, offset: 0
-  };
-
-  // Show plane controls
-  document.getElementById('plane-controls').classList.remove('hidden');
-  document.getElementById('tilt-x').value = 0;
-  document.getElementById('tilt-y').value = 0;
-  document.getElementById('tilt-z').value = 0;
-  document.getElementById('plane-offset').value = 0;
-
-  createPlaneVisual();
-  setTool('define-plane');
-  document.getElementById('points-info').classList.add('hidden');
-  setStatus('Plane defined — adjust with sliders, then Execute Cut');
-}
-
-window.updatePlane = function() {
-  if (!cuttingPlane) return;
-  const tiltX = parseFloat(document.getElementById('tilt-x').value);
-  const tiltY = parseFloat(document.getElementById('tilt-y').value);
-  const tiltZ = parseFloat(document.getElementById('tilt-z').value);
-  const offset = parseFloat(document.getElementById('plane-offset').value);
-
-  document.getElementById('tilt-x-val').textContent = tiltX + '°';
-  document.getElementById('tilt-y-val').textContent = tiltY + '°';
-  document.getElementById('tilt-z-val').textContent = tiltZ + '°';
-  document.getElementById('offset-val').textContent = offset;
-
-  // Apply rotations to base normal
-  const euler = new THREE.Euler(
-    THREE.MathUtils.degToRad(tiltX),
-    THREE.MathUtils.degToRad(tiltY),
-    THREE.MathUtils.degToRad(tiltZ)
-  );
-  const normal = cuttingPlane.baseNormal.clone().applyEuler(euler).normalize();
-  cuttingPlane.normal = normal;
-  cuttingPlane.tiltX = tiltX;
-  cuttingPlane.tiltY = tiltY;
-  cuttingPlane.tiltZ = tiltZ;
-  cuttingPlane.offset = offset;
-
-  // Update origin with offset along normal
-  const p1 = placedPoints[0];
-  const p2 = placedPoints[1];
-  const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
-  cuttingPlane.origin = center.clone().add(normal.clone().multiplyScalar(offset));
-
-  updatePlaneVisual();
-};
-
-function createPlaneVisual() {
-  removePlaneVisual();
-  // Create a large plane mesh
-  const geo = new THREE.PlaneGeometry(500, 500);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x4488ff, transparent: true, opacity: 0.2,
-    side: THREE.DoubleSide, depthWrite: false
-  });
-  planeMesh = new THREE.Mesh(geo, mat);
-  scene.add(planeMesh);
-
-  // Normal line
-  const lineGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,1)
-  ]);
-  const lineMat = new THREE.LineBasicMaterial({color: 0xff4444, linewidth: 2});
-  planeHelperLine = new THREE.Line(lineGeo, lineMat);
-  scene.add(planeHelperLine);
-
-  updatePlaneVisual();
-}
-
-function updatePlaneVisual() {
-  if (!planeMesh || !cuttingPlane) return;
-  planeMesh.position.copy(cuttingPlane.origin);
-  // Orient plane to face the normal direction
-  const up = new THREE.Vector3(0, 0, 1);
-  const quat = new THREE.Quaternion().setFromUnitVectors(up, cuttingPlane.normal);
-  planeMesh.quaternion.copy(quat);
-
-  // Update normal line
-  if (planeHelperLine) {
-    planeHelperLine.position.copy(cuttingPlane.origin);
-    planeHelperLine.quaternion.copy(quat);
-    planeHelperLine.scale.set(1, 1, 80);
-  }
-}
-
-function removePlaneVisual() {
-  if (planeMesh) { scene.remove(planeMesh); planeMesh.geometry.dispose(); planeMesh.material.dispose(); planeMesh = null; }
-  if (planeHelperLine) { scene.remove(planeHelperLine); planeHelperLine.geometry.dispose(); planeHelperLine.material.dispose(); planeHelperLine = null; }
-}
-
-window.clearPlane = function() {
-  cuttingPlane = null;
-  removePlaneVisual();
-  clearPlacedPoints();
-  document.getElementById('plane-controls').classList.add('hidden');
-  setStatus('Plane cleared');
-};
-
-// ============================================================
-//  EXECUTE CUT
-// ============================================================
-window.executeCut = async function() {
-  if (!cuttingPlane) { setStatus('Define a plane first'); return; }
-  if (selectedIdx < 0) { setStatus('Select a bone first'); return; }
-
-  const obj = objects[selectedIdx];
-  if (!obj.caseId || obj.boneIndex === undefined) {
-    setStatus('Can only cut bones from DICOM segmentation');
+  const obj=objects[selectedIdx];
+  if(!obj.caseId||obj.boneIndex===undefined){
+    setStatus('Can only slice bones from DICOM segmentation');
     return;
   }
 
-  setStatus('Cutting bone...');
-  const loading = document.getElementById('loading');
-  const progress = document.getElementById('load-progress');
+  setStatus('Slicing bone...');
+  const loading=document.getElementById('loading');
+  const progress=document.getElementById('load-progress');
   loading.classList.remove('hidden');
-  progress.textContent = 'Computing cut...';
+  progress.textContent='Computing boolean slice...';
 
-  try {
-    const formData = new FormData();
-    formData.append('case_id', obj.caseId);
-    formData.append('bone_index', obj.boneIndex);
-    formData.append('plane_origin', JSON.stringify([
-      cuttingPlane.origin.x, cuttingPlane.origin.y, cuttingPlane.origin.z
-    ]));
-    formData.append('plane_normal', JSON.stringify([
-      cuttingPlane.normal.x, cuttingPlane.normal.y, cuttingPlane.normal.z
-    ]));
+  try{
+    const fd=new FormData();
+    fd.append('case_id',obj.caseId);
+    fd.append('bone_index',obj.boneIndex);
+    fd.append('plane_origin',JSON.stringify([shapeOrigin.x,shapeOrigin.y,shapeOrigin.z]));
+    fd.append('plane_normal',JSON.stringify([shapeNormal.x,shapeNormal.y,shapeNormal.z]));
 
-    const resp = await fetch('/api/cut-bone', {method: 'POST', body: formData});
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({detail: resp.statusText}));
-      throw new Error(err.detail || 'Cut failed');
+    const resp=await fetch('/api/cut-bone',{method:'POST',body:fd});
+    if(!resp.ok){
+      const e=await resp.json().catch(()=>({detail:resp.statusText}));
+      throw new Error(e.detail||'Slice failed');
     }
+    const data=await resp.json();
+    progress.textContent='Loading fragments...';
 
-    const data = await resp.json();
-    console.log('[upload] response:', data);
-    progress.textContent = 'Loading fragments...';
+    const origColor=obj.color;
+    const origName=obj.name;
+    scene.remove(obj.mesh);obj.mesh.geometry.dispose();obj.mesh.material.dispose();
+    objects.splice(selectedIdx,1);selectedIdx=-1;gizmo.detach();
 
-    // Remove original bone
-    const origColor = obj.color;
-    const origName = obj.name;
-    scene.remove(obj.mesh);
-    obj.mesh.geometry.dispose();
-    obj.mesh.material.dispose();
-    objects.splice(selectedIdx, 1);
-    selectedIdx = -1;
-    gizmo.detach();
+    if(!data.positive.empty)addFragment(data.positive,origColor+0x222200,origName+'_pos',obj.caseId);
+    if(!data.negative.empty)addFragment(data.negative,origColor-0x002200,origName+'_neg',obj.caseId);
 
-    // Add positive fragment
-    if (!data.positive.empty) {
-      addFragment(data.positive, origColor + 0x222200, `${origName}_pos`, obj.caseId);
-    }
-    // Add negative fragment
-    if (!data.negative.empty) {
-      addFragment(data.negative, origColor - 0x002200, `${origName}_neg`, obj.caseId);
-    }
-
-    // Clear plane
-    clearPlane();
+    clearShape();
     updateBoneList();
-    setStatus(`Bone cut into ${data.positive.empty ? 0 : 1} + ${data.negative.empty ? 0 : 1} fragments`);
-
-  } catch(e) {
-    setStatus('Cut error: ' + e.message);
-  } finally {
+    setStatus('Bone sliced into fragments');
+  }catch(e){
+    setStatus('Slice error: '+e.message);
+  }finally{
     loading.classList.add('hidden');
   }
 };
 
-function addFragment(meshData, color, name, cId) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(meshData.vertices.flat()), 3));
-  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.faces.flat()), 1));
+function addFragment(meshData,color,name,cId){
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(meshData.vertices.flat()),3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.faces.flat()),1));
   geo.computeVertexNormals();
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: color & 0xffffff, roughness: 0.55, metalness: 0.05,
-    side: THREE.DoubleSide
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = name;
-  scene.add(mesh);
-
-  objects.push({
-    mesh, name, color: color & 0xffffff,
-    origPos: mesh.position.clone(),
-    visible: true, transparent: false,
-    caseId: cId, boneIndex: undefined // fragments don't have boneIndex
-  });
-
-  selectObject(objects.length - 1);
+  const mat=new THREE.MeshStandardMaterial({color:color&0xffffff,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
+  const mesh=new THREE.Mesh(geo,mat);mesh.name=name;scene.add(mesh);
+  objects.push({mesh,name,color:color&0xffffff,origPos:mesh.position.clone(),visible:true,transparent:false,caseId:cId,boneIndex:undefined});
+  selectObject(objects.length-1);
 }
 
-// ============================================================
-//  OBJECT SELECTION
-// ============================================================
-window.selectObject = function(idx) {
-  if (selectedIdx >= 0 && selectedIdx < objects.length) {
+// ============ OBJECT MANAGEMENT ============
+window.selectObject=function(idx){
+  if(selectedIdx>=0&&selectedIdx<objects.length){
     objects[selectedIdx].mesh.material.emissive.setHex(0x000000);
-    objects[selectedIdx].mesh.material.emissiveIntensity = 0;
   }
-  selectedIdx = idx;
-  if (idx >= 0 && idx < objects.length) {
-    const o = objects[idx];
+  selectedIdx=idx;
+  if(idx>=0&&idx<objects.length){
+    const o=objects[idx];
     o.mesh.material.emissive.setHex(0x1a3a5a);
-    o.mesh.material.emissiveIntensity = 0.4;
+    o.mesh.material.emissiveIntensity=0.4;
     gizmo.attach(o.mesh);
-    document.getElementById('transform-section').style.display = 'block';
-    document.getElementById('selected-name').textContent = o.name;
-    const op = o.origPos;
-    document.getElementById('tx').value = Math.round(o.mesh.position.x - op.x);
-    document.getElementById('ty').value = Math.round(o.mesh.position.y - op.y);
-    document.getElementById('tz').value = Math.round(o.mesh.position.z - op.z);
+    document.getElementById('transform-section').style.display='block';
+    document.getElementById('selected-name').textContent=o.name;
     orbit.target.copy(o.mesh.position);
-  } else {
+  }else{
     gizmo.detach();
-    document.getElementById('transform-section').style.display = 'none';
+    document.getElementById('transform-section').style.display='none';
   }
   updateBoneList();
 };
+window.deselectAll=function(){selectObject(-1)};
 
-window.deselectAll = function() { selectObject(-1); };
+window.setGizmo=function(mode){gizmo.setMode(mode);
+  document.querySelectorAll('#toolbar button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('btn-'+mode)?.classList.add('active');};
 
-// ============================================================
-//  GIZMO & TRANSFORM
-// ============================================================
-window.setGizmo = function(mode) {
-  gizmo.setMode(mode);
-  document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
-  document.getElementById('btn-'+mode)?.classList.add('active');
+window.applyTransform=function(){
+  if(selectedIdx<0)return;const o=objects[selectedIdx];
+  o.mesh.position.set(o.origPos.x+(parseFloat(document.getElementById('tx').value)||0),o.origPos.y+(parseFloat(document.getElementById('ty').value)||0),o.origPos.z+(parseFloat(document.getElementById('tz').value)||0));
+};
+window.resetTransform=function(){
+  if(selectedIdx<0)return;const o=objects[selectedIdx];
+  o.mesh.position.copy(o.origPos);o.mesh.rotation.set(0,0,0);o.mesh.scale.set(1,1,1);
+  document.getElementById('tx').value=0;document.getElementById('ty').value=0;document.getElementById('tz').value=0;
+};
+window.deleteSelected=function(){
+  if(selectedIdx<0)return;const o=objects[selectedIdx];
+  gizmo.detach();scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();
+  objects.splice(selectedIdx,1);selectedIdx=-1;
+  document.getElementById('transform-section').style.display='none';updateBoneList();
+};
+window.duplicateSelected=function(){
+  if(selectedIdx<0)return;const src=objects[selectedIdx];
+  const clone=src.mesh.clone();clone.material=src.mesh.material.clone();clone.position.x+=20;
+  clone.name=src.name+'_copy';scene.add(clone);
+  objects.push({mesh:clone,name:clone.name,color:src.color,origPos:clone.position.clone(),visible:true,transparent:false,caseId:src.caseId});
+  selectObject(objects.length-1);updateBoneList();
+};
+window.mirrorSelected=function(){
+  if(selectedIdx<0)return;const src=objects[selectedIdx];
+  const mirror=src.mesh.clone();mirror.material=src.mesh.material.clone();mirror.scale.x*=-1;
+  mirror.name=src.name+'_mirror';scene.add(mirror);
+  objects.push({mesh:mirror,name:mirror.name,color:src.color,origPos:mirror.position.clone(),visible:true,transparent:false,caseId:src.caseId});
+  selectObject(objects.length-1);updateBoneList();
 };
 
-window.applyTransform = function() {
-  if (selectedIdx < 0) return;
-  const o = objects[selectedIdx];
-  o.mesh.position.set(
-    o.origPos.x + (parseFloat(document.getElementById('tx').value)||0),
-    o.origPos.y + (parseFloat(document.getElementById('ty').value)||0),
-    o.origPos.z + (parseFloat(document.getElementById('tz').value)||0)
-  );
-};
-
-window.resetTransform = function() {
-  if (selectedIdx < 0) return;
-  const o = objects[selectedIdx];
-  o.mesh.position.copy(o.origPos);
-  o.mesh.rotation.set(0,0,0);
-  o.mesh.scale.set(1,1,1);
-  document.getElementById('tx').value = 0;
-  document.getElementById('ty').value = 0;
-  document.getElementById('tz').value = 0;
-};
-
-// ============================================================
-//  BONE OPERATIONS
-// ============================================================
-window.deleteSelected = function() {
-  if (selectedIdx < 0) return;
-  const o = objects[selectedIdx];
-  gizmo.detach(); scene.remove(o.mesh);
-  o.mesh.geometry.dispose(); o.mesh.material.dispose();
-  objects.splice(selectedIdx, 1); selectedIdx = -1;
-  document.getElementById('transform-section').style.display = 'none';
-  updateBoneList();
-};
-
-window.duplicateSelected = function() {
-  if (selectedIdx < 0) return;
-  const src = objects[selectedIdx];
-  const clone = src.mesh.clone();
-  clone.material = src.mesh.material.clone();
-  clone.position.x += 20;
-  clone.name = src.name + '_copy';
-  scene.add(clone);
-  objects.push({mesh:clone, name:clone.name, color:src.color, origPos:clone.position.clone(), visible:true, transparent:false, caseId:src.caseId});
-  selectObject(objects.length-1);
-  updateBoneList();
-};
-
-window.mirrorSelected = function() {
-  if (selectedIdx < 0) return;
-  const src = objects[selectedIdx];
-  const mirror = src.mesh.clone();
-  mirror.material = src.mesh.material.clone();
-  mirror.scale.x *= -1;
-  mirror.name = src.name + '_mirror';
-  scene.add(mirror);
-  objects.push({mesh:mirror, name:mirror.name, color:src.color, origPos:mirror.position.clone(), visible:true, transparent:false, caseId:src.caseId});
-  selectObject(objects.length-1);
-  updateBoneList();
-};
-
-// ============================================================
-//  BONE LIST UI
-// ============================================================
-function updateBoneList() {
-  const el = document.getElementById('bone-list');
-  el.innerHTML = objects.map((o, i) => {
-    const sel = i === selectedIdx ? 'selected' : '';
-    const vis = o.visible ? '👁' : '🚫';
-    const hex = '#'+o.color.toString(16).padStart(6,'0');
-    return `<div class="bone-item ${sel}" onclick="selectObject(${i})"><div class="bone-color" style="background:${hex}"></div><span style="flex:1">${o.name}</span><span style="cursor:pointer" onclick="event.stopPropagation();toggleVis(${i})">${vis}</span></div>`;
+function updateBoneList(){
+  const el=document.getElementById('bone-list');
+  el.innerHTML=objects.map((o,i)=>{
+    const sel=i===selectedIdx?'selected':'';
+    const hex='#'+o.color.toString(16).padStart(6,'0');
+    return `<div class="bone-item ${sel}" onclick="selectObject(${i})"><div class="bone-color" style="background:${hex}"></div><span style="flex:1">${o.name}</span></div>`;
   }).join('');
-  document.getElementById('obj-count').textContent = objects.length + ' objects';
+  document.getElementById('obj-count').textContent=objects.length+' objects';
 }
-window.selectObject = selectObject;
 
-function toggleVis(i) {
-  const o = objects[i];
-  o.visible = !o.visible; o.mesh.visible = o.visible;
-  updateBoneList();
-}
-window.toggleVis = toggleVis;
-
-// ============================================================
-//  UPLOAD
-// ============================================================
-
-window.uploadSTL = async function() {
-  const input = document.getElementById('stl-input');
-  if (!input.files.length) { alert('Select an STL/OBJ/PLY file'); return; }
-  const loading = document.getElementById('loading');
-  const progress = document.getElementById('load-progress');
-  loading.classList.remove('hidden');
-  progress.textContent = 'Uploading mesh...';
-
-  const fd = new FormData();
-  fd.append('file', input.files[0]);
-
-  try {
-    const resp = await fetch('/api/upload', {method: 'POST', body: fd});
-    if (!resp.ok) {
-      const e = await resp.json().catch(() => ({detail: resp.statusText}));
-      throw new Error(e.detail || 'Upload failed');
-    }
-    const data = await resp.json();
-    caseId = data.case_id;
-
-    gizmo.detach();
-    objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
-    objects = []; selectedIdx = -1;
-
-    const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
-    const loader = new STLLoader();
-    const geo = await new Promise((resolve, reject) => {
-      loader.load(data.mesh_url, resolve, undefined, reject);
-    });
+// ============ UPLOAD ============
+window.uploadSTL=async function(){
+  const input=document.getElementById('stl-input');
+  if(!input.files.length){alert('Select an STL/OBJ/PLY file');return;}
+  const loading=document.getElementById('loading');
+  const progress=document.getElementById('load-progress');
+  loading.classList.remove('hidden');progress.textContent='Uploading mesh...';
+  const fd=new FormData();fd.append('file',input.files[0]);
+  try{
+    const resp=await fetch('/api/upload',{method:'POST',body:fd});
+    if(!resp.ok){const e=await resp.json().catch(()=>({detail:resp.statusText}));throw new Error(e.detail);}
+    const data=await resp.json();caseId=data.case_id;
+    gizmo.detach();objects.forEach(o=>{scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();});objects=[];selectedIdx=-1;
+    const{STLLoader}=await import('three/addons/loaders/STLLoader.js');
+    const loader=new STLLoader();
+    const geo=await new Promise((res,rej)=>{loader.load(data.mesh_url,res,undefined,rej);});
     geo.computeVertexNormals();
-    const color = COLORS[0];
-    const mat = new THREE.MeshStandardMaterial({color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = 'mesh_0';
-    scene.add(mesh);
-    objects.push({
-      mesh, name: input.files[0].name, color,
-      origPos: mesh.position.clone(), visible: true, transparent: false,
-      caseId: caseId, boneIndex: 0
-    });
-
-    fitCamera();
-    selectObject(0);
-    setStatus('Loaded: ' + input.files[0].name + ' — case ' + caseId);
-  } catch(e) {
-    console.error('[stl] ERROR:', e);
-    setStatus('Error: ' + e.message);
-  } finally {
-    loading.classList.add('hidden');
-  }
+    const mat=new THREE.MeshStandardMaterial({color:COLORS[0],roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(geo,mat);mesh.name=input.files[0].name;scene.add(mesh);
+    objects.push({mesh,name:input.files[0].name,color:COLORS[0],origPos:mesh.position.clone(),visible:true,transparent:false,caseId,boneIndex:0});
+    fitCamera();selectObject(0);setStatus('Loaded: '+input.files[0].name);
+  }catch(e){setStatus('Error: '+e.message);}finally{loading.classList.add('hidden');}
 };
 
-window.uploadDicom = async function() {
-  const input = document.getElementById("dicom-input");
-  const files = [...input.files];
-  if (!files.length) { alert("Select DICOM folder first."); return; }
-  const loading = document.getElementById("loading");
-  const progress = document.getElementById("load-progress");
-  loading.classList.remove("hidden");
-  progress.textContent = "Uploading " + files.length + " files...";
-
-  const fd = new FormData();
-  for (const f of files) { fd.append("files", f, f.webkitRelativePath || f.name); }
-  fd.append("split_bones", document.getElementById("split-bones").checked ? "true" : "false");
-  fd.append("sensitivity", "high");
-
-  try {
-    progress.textContent = "Segmenting bones (30-120s)...";
-    const resp = await fetch("/api/upload-dicom-folder", {method: "POST", body: fd});
-    if (!resp.ok) {
-      const e = await resp.json().catch(() => ({detail: resp.statusText}));
-      throw new Error(e.detail || "Upload failed: " + resp.status);
-    }
-    const data = await resp.json();
-
-    caseId = data.case_id;
-    progress.textContent = "Loading " + data.bone_count + " bone(s)...";
-
-    gizmo.detach();
-    objects.forEach(function(o) { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
-    objects = []; selectedIdx = -1;
-
-    for (var i = 0; i < data.bone_count; i++) {
-      progress.textContent = "Loading bone " + (i+1) + "/" + data.bone_count + "...";
-      var url = "/api/cases/" + caseId + "/bone/" + i + ".stl";
-      var mod = await import("three/addons/loaders/STLLoader.js");
-      var loader = new mod.STLLoader();
-      var geo = await new Promise(function(resolve, reject) { loader.load(url, resolve, undefined, reject); });
+window.uploadDicom=async function(){
+  const input=document.getElementById('dicom-input');
+  const files=[...input.files];
+  if(!files.length){alert('Select DICOM folder first.');return;}
+  const loading=document.getElementById('loading');
+  const progress=document.getElementById('load-progress');
+  loading.classList.remove('hidden');
+  progress.textContent='Uploading '+files.length+' files...';
+  const fd=new FormData();
+  for(const f of files){fd.append('files',f,f.webkitRelativePath||f.name);}
+  fd.append('split_bones',document.getElementById('split-bones').checked?'true':'false');
+  fd.append('sensitivity','high');
+  try{
+    progress.textContent='Segmenting bones (30-120s)...';
+    const resp=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd});
+    if(!resp.ok){const e=await resp.json().catch(()=>({detail:resp.statusText}));throw new Error(e.detail||'Upload failed: '+resp.status);}
+    const data=await resp.json();
+    caseId=data.case_id;progress.textContent='Loading '+data.bone_count+' bone(s)...';
+    gizmo.detach();objects.forEach(o=>{scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();});objects=[];selectedIdx=-1;
+    for(let i=0;i<data.bone_count;i++){
+      progress.textContent='Loading bone '+(i+1)+'/'+data.bone_count+'...';
+      const{STLLoader}=await import('three/addons/loaders/STLLoader.js');
+      const loader=new STLLoader();
+      const geo=await new Promise((res,rej)=>{loader.load('/api/cases/'+caseId+'/bone/'+i+'.stl',res,undefined,rej);});
       geo.computeVertexNormals();
-      var color = COLORS[i % COLORS.length];
-      var mat = new THREE.MeshStandardMaterial({color: color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
-      var mesh = new THREE.Mesh(geo, mat);
-      mesh.name = "bone_" + i;
-      scene.add(mesh);
-      objects.push({
-        mesh: mesh, name: (data.bones[i] && data.bones[i].name) || ("Bone " + (i+1)), color: color,
-        origPos: mesh.position.clone(), visible: true, transparent: false,
-        caseId: caseId, boneIndex: i
-      });
+      const color=COLORS[i%COLORS.length];
+      const mat=new THREE.MeshStandardMaterial({color,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
+      const mesh=new THREE.Mesh(geo,mat);mesh.name='bone_'+i;scene.add(mesh);
+      objects.push({mesh,name:(data.bones[i]&&data.bones[i].name)||('Bone '+(i+1)),color,origPos:mesh.position.clone(),visible:true,transparent:false,caseId,boneIndex:i});
     }
-
-    fitCamera();
-    if (objects.length > 0) selectObject(0);
-    setStatus("Loaded " + data.bone_count + " bone(s) — case " + caseId);
-  } catch(e) {
-    console.error("[upload] ERROR:", e);
-    setStatus("Error: " + e.message);
-  } finally {
-    loading.classList.add("hidden");
-  }
+    fitCamera();if(objects.length>0)selectObject(0);
+    setStatus('Loaded '+data.bone_count+' bone(s) — case '+caseId);
+  }catch(e){setStatus('Error: '+e.message);}finally{loading.classList.add('hidden');}
 };
 
-// ============================================================
-//  CAMERA
-// ============================================================
-function fitCamera() {
-  if (!objects.length) return;
-  const box = new THREE.Box3();
-  objects.forEach(o => box.expandByObject(o.mesh));
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  camera.position.set(center.x, center.y + maxDim*0.3, center.z + maxDim*1.8);
-  orbit.target.copy(center); orbit.update();
+function fitCamera(){
+  if(!objects.length)return;
+  const box=new THREE.Box3();objects.forEach(o=>box.expandByObject(o.mesh));
+  const center=box.getCenter(new THREE.Vector3());const size=box.getSize(new THREE.Vector3());
+  const maxDim=Math.max(size.x,size.y,size.z);
+  camera.position.set(center.x,center.y+maxDim*0.3,center.z+maxDim*1.8);
+  orbit.target.copy(center);orbit.update();
 }
 
-// ============================================================
-//  KEYBOARD
-// ============================================================
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
-  switch(e.key) {
-    case '1': setTool('select'); break;
-    case '2': setTool('place-points'); break;
-    case '3': setTool('define-plane'); break;
-    case 'g': case 'G': setGizmo('translate'); break;
-    case 'r': case 'R': setGizmo('rotate'); break;
-    case 's': case 'S': setGizmo('scale'); break;
-    case 'Delete': case 'Backspace': deleteSelected(); e.preventDefault(); break;
-    case 'Enter': executeCut(); break;
-    case 'Escape': deselectAll(); clearPlacedPoints(); break;
-    case 'f': case 'F': if(selectedIdx>=0){const o=objects[selectedIdx];orbit.target.copy(o.mesh.position);} break;
-    case 'h': case 'H': if(selectedIdx>=0) toggleVis(selectedIdx); break;
-    case 'd': if(e.ctrlKey||e.metaKey){duplicateSelected();e.preventDefault();} break;
-    case 'm': case 'M': mirrorSelected(); break;
-  }
-});
+function setStatus(msg){document.getElementById('status-text').textContent=msg;}
 
-// ============================================================
-//  RESIZE & RENDER
-// ============================================================
-function setStatus(msg) { document.getElementById('status-text').textContent = msg; }
-window.setStatus = setStatus;
-
-window.addEventListener('resize', () => {
-  camera.aspect = container.clientWidth/container.clientHeight;
+// ============ RESIZE & RENDER ============
+window.addEventListener('resize',()=>{
+  camera.aspect=container.clientWidth/container.clientHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setSize(container.clientWidth,container.clientHeight);
 });
-
-function animate() { requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); }
+function animate(){requestAnimationFrame(animate);orbit.update();renderer.render(scene,camera);}
 animate();
-
 document.getElementById('loading').classList.add('hidden');
-setStatus('Ready — upload DICOM to begin planning');
+setStatus('Ready — upload DICOM or STL to begin');
 </script>
 </body>
 </html>
