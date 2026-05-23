@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BonePlannerCAD MVP</title>
+  <style>
+    :root{--bg:#080b12;--panel:#111827;--panel2:#0d1320;--line:#263247;--fg:#e8eefc;--muted:#92a2bd;--accent:#38bdf8;--ok:#22c55e;--bad:#ef4444;--warn:#f59e0b}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,#18223b,#080b12 45%);color:var(--fg);font:14px/1.45 Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+    header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#070b13cc;backdrop-filter:blur(8px)}
+    h1{margin:0;font-size:22px}.sub{color:var(--muted);font-size:13px}.wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px;height:calc(100vh - 75px)}
+    .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;overflow:auto}.viewer{position:relative;min-height:500px;padding:0;overflow:hidden}.viewer canvas{display:block;width:100%;height:100%}
+    label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px} input,select{width:100%;padding:10px;border-radius:10px;background:#07101f;color:var(--fg);border:1px solid #2b3a55;outline:none} input:focus,select:focus{border-color:var(--accent)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}button{width:100%;padding:11px 12px;border:0;border-radius:12px;background:var(--accent);color:#06101d;font-weight:800;cursor:pointer;margin-top:12px}button.secondary{background:#243653;color:#d9e7ff}button:disabled{opacity:.5;cursor:wait}
+    .drop{border:1px dashed #49617f;border-radius:14px;padding:14px;text-align:center;background:#07101f;color:var(--muted)}.drop input{border:0;background:transparent;padding:8px}.status{margin-top:12px;padding:10px;border-radius:12px;background:#07101f;border:1px solid var(--line)}.pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.ok{background:#12351f;color:#85efa5}.bad{background:#431b1b;color:#ff9b9b}.warn{background:#4a330d;color:#ffd17a}
+    pre{white-space:pre-wrap;word-break:break-word;background:#060c17;border:1px solid var(--line);border-radius:12px;padding:10px;color:#d9e7ff;max-height:260px;overflow:auto}.downloads{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}.downloads a{display:block;text-decoration:none;color:#c9e9ff;background:#14233a;border:1px solid #2e4568;padding:9px;border-radius:10px}.hint{font-size:12px;color:var(--muted);margin-top:8px}.toolbar{position:absolute;left:12px;top:12px;z-index:2;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--muted)}
+    @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}.viewer{height:60vh}}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>🦴 BonePlannerCAD MVP</h1><div class="sub">STL os → plane cut → fragment rotation/translation → STL export</div></div>
+  <div class="sub">research prototype · mm units</div>
+</header>
+<div class="wrap">
+  <aside class="panel">
+    <h2>1. Import os / CT</h2>
+    <div class="drop">
+      <input id="file" type="file" accept=".stl,.obj,.ply,.zip,.dcm" />
+      <button onclick="uploadMesh()">Upload STL/OBJ/PLY</button>
+      <div class="hint">Pentru CT complet: selectează folderul cu toate slice-urile DICOM.</div>
+      <input id="folderInput" type="file" webkitdirectory directory multiple />
+      <div class="row">
+        <div><label>Bone threshold HU</label><input id="dicomThreshold" type="number" step="25" value="250"></div>
+        <div><label>Step size</label><input id="dicomStep" type="number" step="1" value="1"></div>
+      </div>
+      <button onclick="uploadDicom()">Upload DICOM ZIP/.dcm → bone STL</button>
+      <button onclick="uploadDicomFolder()">Upload folder CT/DICOM → bone STL</button>
+      <button class="secondary" onclick="loadSample()">Încarcă os demo</button>
+      <button class="secondary" onclick="loadLatestCase()">Încarcă ultimul CT procesat</button>
+    </div>
+    <div id="uploadStatus" class="status"><span class="pill warn">idle</span> Aștept mesh.</div>
+
+    <h2>2. Segmentation workspace</h2>
+    <label>Serie DICOM</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
+    <div class="row">
+      <div><label>HU min os</label><input id="segHuMin" type="number" step="25" value="250"></div>
+      <div><label>HU max / metal cutoff</label><input id="segHuMax" type="number" step="100" value="3000"></div>
+    </div>
+    <div class="row3">
+      <div><label>Step</label><input id="segStep" type="number" step="1" value="1"></div>
+      <div><label>Smooth</label><input id="segSmooth" type="number" step="1" value="2"></div>
+      <div><label>Largest</label><select id="segLargest"><option value="true">Da</option><option value="false">Nu</option></select></div>
+    </div>
+    <button id="regenBtn" onclick="regenerateMesh()" disabled>Regenerate bone mesh</button>
+    <div id="segStatus" class="status"><span class="pill warn">idle</span> Segmentation neconfigurată.</div>
+
+    <h2>3. Tăiere + repoziționare</h2>
+    <div class="row">
+      <div><label>Axa planului de tăiere</label><select id="axis"><option value="z">Z</option><option value="y" selected>Y</option><option value="x">X</option></select></div>
+      <div><label>Offset plan mm</label><input id="offset" type="number" step="1" value="0"></div>
+    </div>
+    <div class="row">
+      <div><label>Fragment modificat</label><select id="side"><option value="positive">positive</option><option value="negative">negative</option></select></div>
+      <div><label>Axa rotație</label><select id="rotAxis"><option value="z">Z</option><option value="y">Y</option><option value="x" selected>X</option></select></div>
+    </div>
+    <label>Rotație grade</label><input id="rotDeg" type="range" min="-60" max="60" step="1" value="15" oninput="rotVal.textContent=this.value+'°'"><div class="hint">Valoare: <b id="rotVal">15°</b></div>
+    <div class="row3"><div><label>Tx</label><input id="tx" type="number" step="1" value="0"></div><div><label>Ty</label><input id="ty" type="number" step="1" value="0"></div><div><label>Tz</label><input id="tz" type="number" step="1" value="0"></div></div>
+    <button id="cutBtn" onclick="runCut()" disabled>Taie / aplică transformare</button>
+    <div id="cutStatus" class="status"><span class="pill warn">idle</span> Fără plan aplicat.</div>
+    <div id="downloads" class="downloads"></div>
+
+    <h2>3. Cutting guide</h2>
+    <div class="row">
+      <div><label>Lungime guide mm</label><input id="gLength" type="number" step="1" value="70"></div>
+      <div><label>Înălțime guide mm</label><input id="gHeight" type="number" step="1" value="22"></div>
+    </div>
+    <div class="row">
+      <div><label>Grosime șină mm</label><input id="gRail" type="number" step="0.5" value="6"></div>
+      <div><label>Lățime slot ferăstrău mm</label><input id="gSlot" type="number" step="0.1" value="1.2"></div>
+    </div>
+    <div class="row3">
+      <div><label>Pin radius</label><input id="gPinR" type="number" step="0.1" value="1.6"></div>
+      <div><label>Pin spacing</label><input id="gPinS" type="number" step="1" value="38"></div>
+      <div><label>Sleeve outer</label><input id="gSleeve" type="number" step="0.1" value="3.2"></div>
+    </div>
+    <button id="guideBtn" onclick="runGuide()" disabled>Generează cutting guide STL</button>
+    <div id="guideStatus" class="status"><span class="pill warn">idle</span> Fără guide.</div>
+    <div id="guideDownloads" class="downloads"></div>
+
+    <h2>4. Conformal guide</h2>
+    <div class="row">
+      <div><label>Contact side</label><select id="cSide"><option value="positive">positive</option><option value="negative">negative</option></select></div>
+      <div><label>Clearance mm</label><input id="cClear" type="number" step="0.1" value="0.6"></div>
+    </div>
+    <div class="row">
+      <div><label>Lungime pad mm</label><input id="cLength" type="number" step="1" value="70"></div>
+      <div><label>Înălțime pad mm</label><input id="cHeight" type="number" step="1" value="28"></div>
+    </div>
+    <div class="row3">
+      <div><label>Grosime</label><input id="cThick" type="number" step="0.5" value="4"></div>
+      <div><label>Res U</label><input id="cResU" type="number" step="1" value="30"></div>
+      <div><label>Res V</label><input id="cResV" type="number" step="1" value="16"></div>
+    </div>
+    <button id="conformalBtn" onclick="runConformal()" disabled>Generează conformal guide STL</button>
+    <div id="conformalStatus" class="status"><span class="pill warn">idle</span> Fără conformal pad.</div>
+    <div id="conformalDownloads" class="downloads"></div>
+
+    <h2>Metadata</h2>
+    <pre id="info">—</pre>
+  </aside>
+
+  <main class="panel viewer" id="viewer">
+    <div class="toolbar">Mouse: rotate · wheel: zoom · right click: pan</div>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+let caseId=null, scene, camera, renderer, controls, meshes=[];
+const $=id=>document.getElementById(id);
+window.rotVal = $('rotVal');
+
+function init(){
+  const el=$('viewer');
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x080b12);
+  camera=new THREE.PerspectiveCamera(45, el.clientWidth/el.clientHeight, 0.1, 10000); camera.position.set(130,140,160);
+  renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(el.clientWidth, el.clientHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); el.appendChild(renderer.domElement);
+  controls=new OrbitControls(camera, renderer.domElement); controls.enableDamping=true;
+  scene.add(new THREE.HemisphereLight(0xffffff,0x334466,1.6));
+  const dl=new THREE.DirectionalLight(0xffffff,1.2); dl.position.set(120,160,100); scene.add(dl);
+  const grid=new THREE.GridHelper(220,22,0x334155,0x172033); scene.add(grid);
+  addPlaneHelper('y',0);
+  window.addEventListener('resize',()=>{camera.aspect=el.clientWidth/el.clientHeight;camera.updateProjectionMatrix();renderer.setSize(el.clientWidth,el.clientHeight)});
+  animate();
+}
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}
+function clearMeshes(){meshes.forEach(m=>scene.remove(m));meshes=[]}
+function addPlaneHelper(axis,offset){
+  // remove old helpers by name
+  [...scene.children].filter(o=>o.name==='cutPlane').forEach(o=>scene.remove(o));
+  const geo=new THREE.PlaneGeometry(180,180); const mat=new THREE.MeshBasicMaterial({color:0x38bdf8,transparent:true,opacity:.18,side:THREE.DoubleSide}); const p=new THREE.Mesh(geo,mat); p.name='cutPlane';
+  if(axis==='y'){p.rotation.x=Math.PI/2;p.position.y=offset}else if(axis==='x'){p.rotation.y=Math.PI/2;p.position.x=offset}else{p.position.z=offset}
+  scene.add(p);
+}
+function loadStl(url, color=0xd8e7ff, opacity=1){
+  return new Promise((resolve,reject)=>{
+    new STLLoader().load(url, geo=>{
+      geo.computeVertexNormals();
+      const mat=new THREE.MeshStandardMaterial({color,roughness:.62,metalness:.05,transparent:opacity<1,opacity,side:THREE.DoubleSide});
+      const mesh=new THREE.Mesh(geo,mat); scene.add(mesh); meshes.push(mesh);
+      $('info').textContent = $('info').textContent === '—' ? `Loaded STL: ${geo.attributes.position.count} vertices` : $('info').textContent;
+      fitCamera(); resolve(mesh);
+    }, undefined, err=>{
+      console.error('STL load failed', err);
+      setStatus('uploadStatus', false, 'STL generat, dar viewer-ul nu l-a putut încărca. Vezi consola/browser.');
+      reject(err);
+    });
+  });
+}
+function fitCamera(){
+  if(!meshes.length)return; const box=new THREE.Box3(); meshes.forEach(m=>box.expandByObject(m)); const size=box.getSize(new THREE.Vector3()).length(); const center=box.getCenter(new THREE.Vector3()); controls.target.copy(center); camera.position.copy(center.clone().add(new THREE.Vector3(size*.7,size*.7,size*.9))); camera.near=size/100; camera.far=size*20; camera.updateProjectionMatrix();
+}
+function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function setStatus(id, ok, msg){$(id).innerHTML=`<span class="pill ${ok?'ok':'bad'}">${ok?'OK':'FAIL'}</span> ${esc(msg)}`}
+
+function enableCadButtons(){ $('cutBtn').disabled=false; $('guideBtn').disabled=false; $('conformalBtn').disabled=false; $('regenBtn').disabled=false; }
+function populateSeries(meta){
+  const sel=$('seriesSelect'); sel.innerHTML='<option value="">auto / largest series</option>';
+  (meta?.available_series||[]).sort((a,b)=>(b.slices||0)-(a.slices||0)).forEach(s=>{
+    const o=document.createElement('option'); o.value=s.uid; o.textContent=`${s.slices} slices — ${s.description||s.uid.slice(0,18)}`; if(s.uid===meta.series_uid)o.selected=true; sel.appendChild(o);
+  });
+  if(meta?.threshold_hu!==undefined) $('segHuMin').value=meta.threshold_hu;
+  if(meta?.threshold_max_hu!==undefined && meta.threshold_max_hu!==null) $('segHuMax').value=meta.threshold_max_hu;
+  if(meta?.step_size!==undefined) $('segStep').value=meta.step_size;
+  if(meta?.smoothing_iterations!==undefined) $('segSmooth').value=meta.smoothing_iterations;
+  $('segStatus').innerHTML=`<span class="pill ok">series</span> ${meta?.slices||'?'} slices · HU ${Math.round(meta?.hu_min||0)}..${Math.round(meta?.hu_max||0)}`;
+}
+window.uploadMesh=async()=>{
+  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Alege un STL/OBJ/PLY.'); return}
+  const fd=new FormData(); fd.append('file',f); $('uploadStatus').innerHTML='<span class="pill warn">upload</span> Procesez mesh...';
+  const r=await fetch('/api/upload',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('uploadStatus',false,j.detail||'upload failed');return}
+  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Mesh încărcat: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+};
+window.uploadDicom=async()=>{
+  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Alege un ZIP DICOM sau .dcm.'); return}
+  const fd=new FormData();
+  fd.append('file',f);
+  fd.append('threshold_hu',$('dicomThreshold').value || '250');
+  fd.append('step_size',$('dicomStep').value || '1');
+  $('uploadStatus').innerHTML='<span class="pill warn">dicom</span> Procesez DICOM → STL. Poate dura...';
+  const r=await fetch('/api/upload-dicom',{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM conversion failed');return}
+  caseId=j.case_id; enableCadButtons();
+  setStatus('uploadStatus',true,'DICOM convertit în mesh os: '+caseId);
+  populateSeries(j.dicom);
+  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
+  clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+};
+window.uploadDicomFolder=async()=>{
+  const files=[...$('folderInput').files];
+  if(!files.length){setStatus('uploadStatus',false,'Alege folderul CT/DICOM întâi.'); return}
+  const fd=new FormData();
+  for(const f of files){ fd.append('files', f, f.webkitRelativePath || f.name); }
+  fd.append('threshold_hu',$('dicomThreshold').value || '250');
+  fd.append('step_size',$('dicomStep').value || '1');
+  $('uploadStatus').innerHTML=`<span class="pill warn">folder</span> Procesez ${files.length} fișiere DICOM → STL. Poate dura...`;
+  const r=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM folder conversion failed');return}
+  caseId=j.case_id; enableCadButtons();
+  setStatus('uploadStatus',true,`Folder DICOM convertit: ${caseId} (${j.dicom.uploaded_files||files.length} fișiere)`);
+  populateSeries(j.dicom);
+  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
+  clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+};
+window.loadLatestCase=async()=>{
+  $('uploadStatus').innerHTML='<span class="pill warn">load</span> Caut ultimul CT procesat...';
+  const r=await fetch('/api/recent-cases?limit=10'); const rows=await r.json();
+  const j=rows.find(x=>x.is_dicom) || rows[0];
+  if(!j){setStatus('uploadStatus',false,'Nu există caz procesat.'); return}
+  caseId=j.case_id; enableCadButtons();
+  setStatus('uploadStatus',true,`Încărcat caz ${caseId} (${Math.round(j.size_bytes/1024)} KB STL)`);
+  if(j.dicom) populateSeries(j.dicom);
+  $('info').textContent=JSON.stringify({case_id:caseId,dicom:j.dicom},null,2);
+  clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xf8fafc,1);
+};
+window.loadSample=async()=>{
+  $('uploadStatus').innerHTML='<span class="pill warn">sample</span> Generez os demo...'; const r=await fetch('/api/sample',{method:'POST'}); const j=await r.json();
+  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Os demo încărcat: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
+};
+window.regenerateMesh=async()=>{
+  if(!caseId){setStatus('segStatus',false,'Încarcă un CT întâi.'); return}
+  $('segStatus').innerHTML='<span class="pill warn">working</span> Regenerare mesh os...';
+  const fd=new FormData();
+  fd.append('threshold_hu',$('segHuMin').value||'250');
+  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
+  fd.append('step_size',$('segStep').value||'1');
+  fd.append('series_uid',$('seriesSelect').value||'');
+  fd.append('keep_largest',$('segLargest').value);
+  fd.append('smoothing_iterations',$('segSmooth').value||'2');
+  const r=await fetch(`/api/cases/${caseId}/regenerate-mesh`,{method:'POST',body:fd}); const j=await r.json();
+  if(!r.ok){setStatus('segStatus',false,j.detail||'regenerate failed');return}
+  populateSeries(j.dicom);
+  setStatus('segStatus',true,`Mesh regenerat: ${j.info.vertices} vertices / ${j.info.faces} faces`);
+  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
+  clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xd8e7ff,1);
+};
+window.runCut=async()=>{
+  if(!caseId){setStatus('cutStatus',false,'Încarcă mesh întâi.'); return}
+  $('cutStatus').innerHTML='<span class="pill warn">working</span> Tai mesh-ul...'; $('downloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  const fd=new FormData();
+  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['rotate_side',$('side').value],['rotate_axis',$('rotAxis').value],['rotate_deg',$('rotDeg').value],['translate_x',$('tx').value],['translate_y',$('ty').value],['translate_z',$('tz').value]].forEach(([k,v])=>fd.append(k,v));
+  const r=await fetch('/api/cut',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('cutStatus',false,j.detail||'cut failed');return}
+  setStatus('cutStatus',true,'Plan aplicat. Fragmente exportate.'); $('info').textContent=JSON.stringify(j,null,2);
+  clearMeshes(); await loadStl(j.outputs.positive+'?t='+Date.now(),0x60a5fa,.92); await loadStl(j.outputs.negative+'?t='+Date.now(),0xf97316,.92);
+  $('downloads').innerHTML=`<a href="${j.outputs.positive}" download>Download fragment positive STL</a><a href="${j.outputs.negative}" download>Download fragment negative STL</a><a href="${j.outputs.combined}" download>Download combined repositioned STL</a><a href="${j.outputs.plan}" download>Download plan JSON</a>`;
+};
+window.runGuide=async()=>{
+  if(!caseId){setStatus('guideStatus',false,'Încarcă mesh întâi.'); return}
+  $('guideStatus').innerHTML='<span class="pill warn">working</span> Generez guide STL...'; $('guideDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  const fd=new FormData();
+  [
+    ['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],
+    ['length_mm',$('gLength').value],['height_mm',$('gHeight').value],['rail_thickness_mm',$('gRail').value],['slot_width_mm',$('gSlot').value],
+    ['pin_radius_mm',$('gPinR').value],['pin_spacing_mm',$('gPinS').value],['pin_sleeve_outer_mm',$('gSleeve').value]
+  ].forEach(([k,v])=>fd.append(k,v));
+  const r=await fetch('/api/guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('guideStatus',false,j.detail||'guide failed');return}
+  setStatus('guideStatus',true,'Cutting guide generat.'); $('info').textContent=JSON.stringify(j,null,2);
+  await loadStl(j.outputs.guide+'?t='+Date.now(),0x22c55e,.72);
+  $('guideDownloads').innerHTML=`<a href="${j.outputs.guide}" download>Download cutting guide STL</a><a href="${j.outputs.guide_json}" download>Download guide JSON</a>`;
+};
+window.runConformal=async()=>{
+  if(!caseId){setStatus('conformalStatus',false,'Încarcă mesh întâi.'); return}
+  $('conformalStatus').innerHTML='<span class="pill warn">working</span> Generez contact surface după os...'; $('conformalDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
+  const fd=new FormData();
+  [
+    ['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['contact_side',$('cSide').value],
+    ['length_mm',$('cLength').value],['height_mm',$('cHeight').value],['thickness_mm',$('cThick').value],['clearance_mm',$('cClear').value],
+    ['resolution_u',$('cResU').value],['resolution_v',$('cResV').value],['include_slot_rails','true']
+  ].forEach(([k,v])=>fd.append(k,v));
+  const r=await fetch('/api/conformal-guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('conformalStatus',false,j.detail||'conformal failed');return}
+  setStatus('conformalStatus',true,'Conformal guide generat.'); $('info').textContent=JSON.stringify(j,null,2);
+  await loadStl(j.outputs.combined+'?t='+Date.now(),0xa855f7,.70);
+  $('conformalDownloads').innerHTML=`<a href="${j.outputs.combined}" download>Download conformal cutting guide STL</a><a href="${j.outputs.pad}" download>Download contact pad STL</a><a href="${j.outputs.json}" download>Download conformal JSON</a>`;
+};
+$('axis').addEventListener('change',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
+$('offset').addEventListener('input',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
+init();
+</script>
+</body>
+</html>

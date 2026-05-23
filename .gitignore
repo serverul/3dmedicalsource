@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime data / PHI / generated medical files
+# Do NOT commit uploaded CT/DICOM, patient data, generated case outputs.
+data/uploads/
+data/outputs/
+data/tmp/
+
+# Keep only safe synthetic/demo sample geometry
+data/samples/*.stl
+!data/samples/sample_long_bone.stl
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log

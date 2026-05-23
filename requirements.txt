@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+numpy
+pydicom
+trimesh
+scipy
+scikit-image
+shapely
+mapbox-earcut
