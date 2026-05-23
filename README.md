@@ -1,4 +1,4 @@
-# BonePlannerCAD MVP
+# 3DMedicalPlanner MVP
 
 Research prototype for **patient-specific 3D surgical CAD**: CT/DICOM-derived bone meshes, virtual osteotomy, fragment repositioning, cutting guides, and first-pass conformal guide surfaces.
 

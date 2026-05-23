@@ -6,7 +6,7 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, CTImageStorage, generate_uid
 from app import dicom_to_bone_mesh
 
-base=Path('/tmp/boneplanner_test_dicom')
+base=Path('/tmp/3dmedicalplanner_test_dicom')
 if base.exists():
     import shutil; shutil.rmtree(base)
 base.mkdir()

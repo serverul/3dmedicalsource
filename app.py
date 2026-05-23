@@ -24,7 +24,7 @@ STATIC = BASE / "static"
 for p in (UPLOADS, OUTPUTS, SAMPLES, STATIC):
     p.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="BonePlannerCAD MVP", version="0.1.0")
+app = FastAPI(title="3DMedicalPlanner MVP", version="0.1.0")
 
 
 def load_mesh(path: Path) -> trimesh.Trimesh:
@@ -446,7 +446,7 @@ def root():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "app": "BonePlannerCAD", "version": "0.1.0"}
+    return {"ok": True, "app": "3DMedicalPlanner", "version": "0.1.0"}
 
 
 @app.post("/api/upload")

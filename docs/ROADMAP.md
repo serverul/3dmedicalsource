@@ -2,7 +2,7 @@
 
 ## Product direction
 
-BonePlannerCAD is not a generic DICOM viewer. Horos and VPOP already cover much of 2D/viewer planning. The target is:
+3DMedicalPlanner is not a generic DICOM viewer. Horos and VPOP already cover much of 2D/viewer planning. The target is:
 
 ```txt
 3D CT-based patient-specific surgical CAD for bones

@@ -2,7 +2,7 @@
 
 ## Overview
 
-BonePlannerCAD is currently a single-process MVP:
+3DMedicalPlanner is currently a single-process MVP:
 
 ```txt
 Browser UI (Three.js)

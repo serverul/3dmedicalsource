@@ -1,6 +1,6 @@
-# AGENTS.md — BonePlannerCAD
+# AGENTS.md — 3DMedicalPlanner
 
-You are working on BonePlannerCAD, a research prototype for 3D CT-based surgical CAD.
+You are working on 3DMedicalPlanner, a research prototype for 3D CT-based surgical CAD.
 
 ## Mission
 
