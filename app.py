@@ -1222,78 +1222,191 @@ def dicom_to_bone_meshes(
     step_size: int = 1,
     series_uid: Optional[str] = None,
     threshold_max_hu: Optional[float] = None,
-    smoothing_iterations: int = 15,
+    smoothing_iterations: int = 25,
     smoothing_method: str = "vtk_sinc",
     min_bone_volume_mm3: float = 50.0,
     preset: Optional[str] = None,
     case_dir: Optional[Path] = None,
     sensitivity: str = "medium",
     max_bones: int = 20,
+    separation_erosion: int = 2,
 ) -> tuple[list, dict]:
     """Convert DICOM CT series to MULTIPLE bone meshes — one per bone.
 
-    Uses the same v3 segmentation pipeline, then splits the mesh into
-    individual bones using connected components (like 3D Slicer's 'Split Islands').
+    KEY IMPROVEMENT: Separates bones at the VOXEL LEVEL before marching cubes.
+    At joints, bones are connected by cartilage or thin bone bridges.
+    Morphological erosion breaks these connections, then connected components
+    labeling identifies each bone individually.
 
-    Each bone gets VTK Windowed Sinc smoothing (same as Slicer/Horos).
+    Pipeline:
+      1. Load DICOM → auto-threshold → binary mask
+      2. Erode mask to break thin connections between bones
+      3. Label connected components in 3D
+      4. For each component: dilate back to restore original shape
+      5. Marching cubes per bone
+      6. VTK Windowed Sinc smoothing per bone (Slicer/Horos quality)
 
     Returns (list of (bone_name, mesh), meta_dict).
     """
-    # Run the standard pipeline to get a combined mesh
-    mesh, meta = dicom_to_bone_mesh(
-        dicom_dir=dicom_dir,
-        threshold_hu=threshold_hu,
-        step_size=step_size,
-        series_uid=series_uid,
-        threshold_max_hu=threshold_max_hu,
-        keep_largest=False,  # keep ALL components, we'll split them
-        smoothing_iterations=0,  # no smoothing yet — we'll do it per-bone with VTK
-        morphology_closing_radius=2,
-        morphology_opening_radius=1,
-        fill_holes=True,
-        min_island_volume_mm3=min_bone_volume_mm3,
-        roi_crop=True,
-        pca_align=False,
-        decimation_target_faces=None,
-        repair_mesh=True,
-        preset=preset,
-        case_dir=case_dir,
-        sensitivity=sensitivity,
-        smoothing_method="none",  # skip smoothing — we'll do VTK sinc per-bone
-    )
+    from scipy.ndimage import binary_erosion, binary_dilation, binary_fill_holes
+    from scipy.ndimage import label as ndi_label
+    from skimage import measure
 
-    # Split into individual bones
-    bone_list = _split_mesh_into_bones(mesh, min_volume_mm3=min_bone_volume_mm3)
+    # Load volume
+    vol, spacing, meta = load_dicom_series(dicom_dir, selected_series_uid=series_uid)
+    hu_min_actual = float(np.min(vol))
+    hu_max_actual = float(np.max(vol))
 
-    # Limit number of bones
-    bone_list = bone_list[:max_bones]
+    # Cache volume
+    if case_dir is not None:
+        npy_path = case_dir / "volume_cache.npy"
+        if not npy_path.exists():
+            np.save(str(npy_path), vol)
 
-    # Apply VTK Windowed Sinc smoothing to each bone (Slicer/Horos quality)
-    smoothed_bones = []
-    for bone_name, bone_mesh in bone_list:
+    # Auto-threshold
+    auto_info = {}
+    if sensitivity:
+        auto_tmin, auto_tmax, auto_warnings = _auto_threshold(vol, sensitivity=sensitivity)
+        if threshold_hu == 150.0:
+            threshold_hu = auto_tmin
+        if threshold_max_hu is None or threshold_max_hu == 3000.0:
+            threshold_max_hu = auto_tmax
+        auto_info = {"auto_threshold_min": auto_tmin, "auto_threshold_max": auto_tmax}
+
+    # Create binary mask
+    if threshold_max_hu is not None and threshold_max_hu > threshold_hu:
+        mask = (vol >= threshold_hu) & (vol <= threshold_max_hu)
+    else:
+        mask = vol >= threshold_hu
+    src = mask.astype(np.float32)
+
+    # Z crop to bone region
+    _, z_start, z_end, _ = _validate_slice_quality(src, spacing)
+    src = src[z_start:z_end]
+
+    # ROI crop
+    src, crop_offset, orig_shape = _roi_crop(src, spacing)
+
+    # Fill holes in the mask (important for cortical bone)
+    for z in range(src.shape[0]):
+        slice_mask = src[z] > 0.5
+        if slice_mask.any():
+            src[z] = binary_fill_holes(slice_mask).astype(np.float32)
+
+    # --- KEY STEP: Erode to break connections between bones ---
+    if separation_erosion > 0:
+        struct = np.ones((2 * separation_erosion + 1,) * 3, dtype=np.uint8)
+        eroded = binary_erosion(src > 0.5, structure=struct).astype(np.float32)
+    else:
+        eroded = src
+
+    # Label connected components in 3D
+    labels, num_components = ndi_label(eroded > 0.5)
+    print(f"[bone separation] Found {num_components} connected components after erosion")
+
+    # For each component, dilate back to restore original shape, then marching cubes
+    voxel_volume = float(spacing[0] * spacing[1] * spacing[2])
+    bone_list = []
+
+    for comp_id in range(1, num_components + 1):
+        comp_mask = (labels == comp_id).astype(np.float32)
+        comp_volume = float(comp_mask.sum()) * voxel_volume
+
+        if comp_volume < min_bone_volume_mm3:
+            continue
+
+        # Dilate back to restore the original bone shape
+        if separation_erosion > 0:
+            # Use the original mask restricted to this component's region
+            # Dilate the eroded component, then intersect with original mask
+            dilated = binary_dilation(comp_mask > 0.5, structure=struct).astype(np.float32)
+            # Intersect with original mask to get the real bone shape
+            restored = (dilated * (src > 0.5)).astype(np.float32)
+            # Also fill holes in this specific bone
+            for z in range(restored.shape[0]):
+                sl = restored[z] > 0.5
+                if sl.any():
+                    restored[z] = binary_fill_holes(sl).astype(np.float32)
+        else:
+            restored = comp_mask
+
+        # Remove small islands within this bone
+        restored = _remove_small_islands(restored, spacing, min_volume_mm3=min_bone_volume_mm3 * 0.5)
+
+        if restored.sum() < 10:
+            continue
+
+        # Marching cubes for this bone
+        try:
+            verts, faces, normals, values = measure.marching_cubes(
+                restored,
+                level=0.5,
+                spacing=spacing,
+                step_size=max(1, int(step_size)),
+                allow_degenerate=False,
+            )
+        except Exception:
+            continue
+
+        # Convert to x,y,z
+        verts_xyz = verts[:, [2, 1, 0]]
+
+        # Adjust for crop offset
+        if crop_offset != (0, 0, 0):
+            offset_phys = np.array([
+                crop_offset[0] * spacing[0],
+                crop_offset[1] * spacing[1],
+                crop_offset[2] * spacing[2],
+            ])
+            verts_xyz += offset_phys
+
+        bone_mesh = trimesh.Trimesh(vertices=verts_xyz, faces=faces, process=True)
+        bone_mesh.remove_unreferenced_vertices()
+
+        # Basic repair
+        try:
+            trimesh.repair.fix_winding(bone_mesh)
+            trimesh.repair.fix_normals(bone_mesh)
+            trimesh.repair.fill_holes(bone_mesh)
+        except Exception:
+            pass
+
+        # VTK Windowed Sinc smoothing (Slicer/Horos quality)
         if smoothing_method == "vtk_sinc" and smoothing_iterations > 0:
             bone_mesh = _vtk_windowed_sinc_smooth(
                 bone_mesh,
                 iterations=smoothing_iterations,
-                pass_band=0.1,
+                pass_band=0.05,  # lower = smoother surface
                 feature_angle=120.0,
-                feature_smoothing=False,  # preserve sharp edges at joints
+                feature_smoothing=False,
                 boundary_smoothing=True,
+                non_manifold_smoothing=True,
+                normalize_coordinates=True,
             )
-        smoothed_bones.append((bone_name, bone_mesh))
+
+        bone_list.append((f"bone_{len(bone_list)}", bone_mesh, comp_volume))
+
+    # Sort by volume descending
+    bone_list.sort(key=lambda x: x[2], reverse=True)
+    bone_list = bone_list[:max_bones]
+
+    # Build result
+    smoothed_bones = [(name, bm) for name, bm, _ in bone_list]
 
     meta["bone_count"] = len(smoothed_bones)
+    meta["auto_threshold"] = auto_info
+    meta["separation_erosion"] = separation_erosion
     meta["bones"] = []
     for name, bm in smoothed_bones:
         try:
-            vol = bm.volume if bm.is_watertight else bm.bounding_box_oriented.volume
+            vol_val = bm.volume if bm.is_watertight else bm.bounding_box_oriented.volume
         except Exception:
-            vol = 0.0
+            vol_val = 0.0
         meta["bones"].append({
             "name": name,
             "vertices": len(bm.vertices),
             "faces": len(bm.faces),
-            "volume_mm3": round(vol, 2),
+            "volume_mm3": round(vol_val, 2),
             "centroid": bm.centroid.tolist(),
             "bounds": bm.bounds.tolist(),
         })
