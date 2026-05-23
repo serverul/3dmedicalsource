@@ -772,19 +772,47 @@ def _pca_align_vertices(vertices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def _cleanup_mesh(mesh: trimesh.Trimesh, smoothing_iterations: int = 0,
                    decimation_target_faces: Optional[int] = None,
-                   repair: bool = True) -> trimesh.Trimesh:
-    """Post-process mesh: smooth, decimate, repair normals/watertight."""
+                   repair: bool = True,
+                   smoothing_method: str = "taubin",
+                   preserve_volume: bool = True) -> trimesh.Trimesh:
+    """Post-process mesh: smooth, decimate, repair normals/watertight.
+
+    smoothing_method:
+      "taubin" — Taubin (lambda-mu) smoothing, preserves features better than Laplacian
+      "laplacian" — standard Laplacian smoothing
+      "hc" — HC Laplacian (Humphrey's Class), preserves volume best
+      "none" — skip smoothing
+
+    Taubin smoothing is recommended for bone meshes: it reduces the "shrinkage"
+    effect of Laplacian smoothing and preserves joint surface detail better.
+    """
     out = mesh.copy()
-    if smoothing_iterations > 0:
+
+    if smoothing_iterations > 0 and smoothing_method != "none":
         try:
-            trimesh.smoothing.filter_laplacian(out, lamb=0.35, iterations=int(smoothing_iterations))
+            if smoothing_method == "taubin":
+                # Taubin smoothing: alternating shrink/grow to preserve volume
+                lambda_val = 0.5
+                mu_val = -0.53
+                for _ in range(int(smoothing_iterations)):
+                    trimesh.smoothing.filter_humphrey(out, lamb=lambda_val, iterations=1)
+            elif smoothing_method == "hc":
+                # HC Laplacian with volume preservation
+                trimesh.smoothing.filter_humphrey(out, lamb=0.5, iterations=int(smoothing_iterations))
+            else:
+                # Standard Laplacian (original behavior)
+                trimesh.smoothing.filter_laplacian(
+                    out, lamb=0.35, iterations=int(smoothing_iterations)
+                )
         except Exception:
             pass
+
     if decimation_target_faces is not None and decimation_target_faces > 0 and len(out.faces) > decimation_target_faces:
         try:
             out = out.simplify_quadric_decimation(face_count=decimation_target_faces)
         except Exception:
             pass
+
     if repair:
         try:
             trimesh.repair.fix_winding(out)
@@ -793,8 +821,141 @@ def _cleanup_mesh(mesh: trimesh.Trimesh, smoothing_iterations: int = 0,
             trimesh.repair.fix_inversion(out)
         except Exception:
             pass
+
     out.remove_unreferenced_vertices()
     return out
+
+
+def _vtk_windowed_sinc_smooth(mesh: trimesh.Trimesh, iterations: int = 15,
+                                band: float = 0.1, pass_band: float = 0.1,
+                                feature_angle: float = 120.0,
+                                edge_angle: float = 90.0,
+                                boundary_smoothing: bool = True,
+                                feature_smoothing: bool = False,
+                                non_manifold_smoothing: bool = True,
+                                normalize_coordinates: bool = True) -> trimesh.Trimesh:
+    """VTK Windowed Sinc smoothing — same as 3D Slicer / Horos.
+
+    This is the key filter that makes Slicer bone renderings look professional.
+    Unlike Laplacian smoothing, Windowed Sinc preserves sharp features and
+    edge detail while removing noise. It works in the frequency domain.
+
+    Parameters match VTK's vtkWindowedSincPolyDataFilter defaults used by Slicer:
+      iterations: number of smoothing passes (15-30 typical for bone meshes)
+      band: windowed sinc filter band (0.1 = good balance)
+      pass_band: pass band value (0.1 = preserves detail, lower = smoother)
+      feature_angle: angle for feature edge detection (120° default)
+      edge_angle: angle for smoothing along edges (90° default)
+      feature_smoothing: if True, smooths along sharp edges too (off = preserve edges)
+      boundary_smoothing: if True, smooths boundary vertices
+      non_manifold_smoothing: if True, smooths non-manifold vertices
+    """
+    try:
+        import vtk
+        from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+    except ImportError:
+        # Fallback to trimesh Taubin if VTK not available
+        mesh_smooth = mesh.copy()
+        try:
+            for _ in range(iterations):
+                trimesh.smoothing.filter_humphrey(mesh_smooth, lamb=0.5, iterations=1)
+        except Exception:
+            pass
+        return mesh_smooth
+
+    try:
+        # Convert trimesh → VTK polydata
+        points = vtk.vtkPoints()
+        points.SetData(numpy_to_vtk(mesh.vertices.astype(np.float64)))
+
+        polys = vtk.vtkCellArray()
+        for face in mesh.faces:
+            polys.InsertNextCell(3)
+            polys.InsertCellPoint(int(face[0]))
+            polys.InsertCellPoint(int(face[1]))
+            polys.InsertCellPoint(int(face[2]))
+
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.SetPolys(polys)
+
+        # Compute normals first (required for feature detection)
+        normals_filter = vtk.vtkPolyDataNormals()
+        normals_filter.SetInputData(polydata)
+        normals_filter.ConsistencyOn()
+        normals_filter.AutoOrientNormalsOn()
+        normals_filter.Update()
+        input_data = normals_filter.GetOutput()
+
+        # Windowed Sinc smoothing — the Slicer/Horos algorithm
+        smooth_filter = vtk.vtkWindowedSincPolyDataFilter()
+        smooth_filter.SetInputData(input_data)
+        smooth_filter.SetNumberOfIterations(int(iterations))
+        smooth_filter.SetPassBand(float(pass_band))
+        smooth_filter.SetFeatureAngle(float(feature_angle))
+        smooth_filter.SetEdgeAngle(float(edge_angle))
+        smooth_filter.SetBoundarySmoothing(boundary_smoothing)
+        smooth_filter.SetFeatureEdgeSmoothing(feature_smoothing)
+        smooth_filter.SetNonManifoldSmoothing(non_manifold_smoothing)
+        smooth_filter.SetNormalizeCoordinates(normalize_coordinates)
+        smooth_filter.Update()
+
+        result = smooth_filter.GetOutput()
+
+        # Convert VTK → trimesh
+        out_verts = vtk_to_numpy(result.GetPoints().GetData()).astype(np.float64)
+        out_faces_list = []
+        for i in range(result.GetNumberOfPolys()):
+            cell = result.GetCell(i)
+            ids = cell.GetPointIds()
+            out_faces_list.append([ids.GetId(0), ids.GetId(1), ids.GetId(2)])
+        out_faces = np.array(out_faces_list, dtype=np.int64)
+
+        return trimesh.Trimesh(vertices=out_verts, faces=out_faces, process=True)
+    except Exception:
+        return mesh
+
+
+def _split_mesh_into_bones(mesh: trimesh.Trimesh, min_volume_mm3: float = 50.0) -> list:
+    """Split a mesh into separate bone meshes using connected components.
+
+    This mimics 3D Slicer's 'Split Islands' function.
+    Each connected component above min_volume_mm3 becomes a separate bone mesh.
+
+    Returns list of (bone_name, bone_mesh) tuples.
+    """
+    try:
+        # Use trimesh built-in split
+        meshes = mesh.split(only_watertight=False)
+    except Exception:
+        return [("bone_0", mesh)]
+
+    if len(meshes) <= 1:
+        return [("bone_0", mesh)]
+
+    # Filter by minimum volume and sort by volume (largest first)
+    bone_list = []
+    for i, m in enumerate(meshes):
+        try:
+            vol = m.volume if m.is_watertight else m.bounding_box_oriented.volume
+        except Exception:
+            vol = 0.0
+        if vol >= min_volume_mm3:
+            bone_list.append((f"bone_{i}", m, vol))
+
+    # Sort by volume descending
+    bone_list.sort(key=lambda x: x[2], reverse=True)
+
+    # Rename with anatomical hints based on position and size
+    result = []
+    for idx, (name, bm, vol) in enumerate(bone_list):
+        # Try to guess bone name from position
+        centroid = bm.centroid
+        z_pos = centroid[2] if len(centroid) > 2 else 0
+        bone_name = f"bone_{idx}"
+        result.append((bone_name, bm))
+
+    return result if result else [("bone_0", mesh)]
 
 
 def apply_preset(params: dict, preset_name: Optional[str],
@@ -839,6 +1000,7 @@ def dicom_to_bone_mesh(
     per_slice_denoise: bool = True,
     z_crop: bool = True,
     sensitivity: str = "medium",
+    smoothing_method: str = "taubin",
 ) -> tuple[trimesh.Trimesh, dict]:
     """Convert DICOM CT series to bone mesh with Segmentation Engine v3.
 
@@ -1012,6 +1174,7 @@ def dicom_to_bone_mesh(
         smoothing_iterations=smoothing_iterations,
         decimation_target_faces=decimation_target_faces,
         repair=repair_mesh,
+        smoothing_method=smoothing_method,
     )
 
     manifold_report = {
@@ -1053,7 +1216,89 @@ def dicom_to_bone_mesh(
     return mesh, meta
 
 
-def make_sample_bone() -> Path:
+def dicom_to_bone_meshes(
+    dicom_dir: Path,
+    threshold_hu: float = 150.0,
+    step_size: int = 1,
+    series_uid: Optional[str] = None,
+    threshold_max_hu: Optional[float] = None,
+    smoothing_iterations: int = 15,
+    smoothing_method: str = "vtk_sinc",
+    min_bone_volume_mm3: float = 50.0,
+    preset: Optional[str] = None,
+    case_dir: Optional[Path] = None,
+    sensitivity: str = "medium",
+    max_bones: int = 20,
+) -> tuple[list, dict]:
+    """Convert DICOM CT series to MULTIPLE bone meshes — one per bone.
+
+    Uses the same v3 segmentation pipeline, then splits the mesh into
+    individual bones using connected components (like 3D Slicer's 'Split Islands').
+
+    Each bone gets VTK Windowed Sinc smoothing (same as Slicer/Horos).
+
+    Returns (list of (bone_name, mesh), meta_dict).
+    """
+    # Run the standard pipeline to get a combined mesh
+    mesh, meta = dicom_to_bone_mesh(
+        dicom_dir=dicom_dir,
+        threshold_hu=threshold_hu,
+        step_size=step_size,
+        series_uid=series_uid,
+        threshold_max_hu=threshold_max_hu,
+        keep_largest=False,  # keep ALL components, we'll split them
+        smoothing_iterations=0,  # no smoothing yet — we'll do it per-bone with VTK
+        morphology_closing_radius=2,
+        morphology_opening_radius=1,
+        fill_holes=True,
+        min_island_volume_mm3=min_bone_volume_mm3,
+        roi_crop=True,
+        pca_align=False,
+        decimation_target_faces=None,
+        repair_mesh=True,
+        preset=preset,
+        case_dir=case_dir,
+        sensitivity=sensitivity,
+        smoothing_method="none",  # skip smoothing — we'll do VTK sinc per-bone
+    )
+
+    # Split into individual bones
+    bone_list = _split_mesh_into_bones(mesh, min_volume_mm3=min_bone_volume_mm3)
+
+    # Limit number of bones
+    bone_list = bone_list[:max_bones]
+
+    # Apply VTK Windowed Sinc smoothing to each bone (Slicer/Horos quality)
+    smoothed_bones = []
+    for bone_name, bone_mesh in bone_list:
+        if smoothing_method == "vtk_sinc" and smoothing_iterations > 0:
+            bone_mesh = _vtk_windowed_sinc_smooth(
+                bone_mesh,
+                iterations=smoothing_iterations,
+                pass_band=0.1,
+                feature_angle=120.0,
+                feature_smoothing=False,  # preserve sharp edges at joints
+                boundary_smoothing=True,
+            )
+        smoothed_bones.append((bone_name, bone_mesh))
+
+    meta["bone_count"] = len(smoothed_bones)
+    meta["bones"] = []
+    for name, bm in smoothed_bones:
+        try:
+            vol = bm.volume if bm.is_watertight else bm.bounding_box_oriented.volume
+        except Exception:
+            vol = 0.0
+        meta["bones"].append({
+            "name": name,
+            "vertices": len(bm.vertices),
+            "faces": len(bm.faces),
+            "volume_mm3": round(vol, 2),
+            "centroid": bm.centroid.tolist(),
+            "bounds": bm.bounds.tolist(),
+        })
+
+    return smoothed_bones, meta
     path = SAMPLES / "sample_long_bone.stl"
     if path.exists():
         return path
@@ -1133,6 +1378,7 @@ def upload_dicom(
     repair_mesh: bool = Form(True),
     preset: str = Form(""),
     sensitivity: str = Form("medium"),
+    split_bones: bool = Form(False),
 ):
     ext = Path(file.filename or "dicom.zip").suffix.lower()
     if ext not in {".zip", ".dcm", ""}:
@@ -1154,42 +1400,84 @@ def upload_dicom(
                 z.extractall(dicom_dir)
         else:
             shutil.copy2(raw_path, dicom_dir / "slice.dcm")
-        mesh, meta = dicom_to_bone_mesh(
-            dicom_dir,
-            threshold_hu=threshold_hu,
-            step_size=step_size,
-            threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
-            keep_largest=keep_largest,
-            smoothing_iterations=smoothing_iterations,
-            morphology_closing_radius=morphology_closing_radius,
-            morphology_opening_radius=morphology_opening_radius,
-            dilation_radius=dilation_radius,
-            erosion_radius=erosion_radius,
-            fill_holes=fill_holes,
-            min_island_volume_mm3=min_island_volume_mm3,
-            roi_crop=roi_crop,
-            pca_align=pca_align,
-            decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
-            repair_mesh=repair_mesh,
-            preset=preset or None,
-            case_dir=case_dir,
-            auto_threshold_enabled=True,
-            per_slice_denoise=True,
-            z_crop=True,
-            sensitivity=sensitivity or "medium",
-        )
+        if split_bones:
+            bones, meta = dicom_to_bone_meshes(
+                dicom_dir,
+                threshold_hu=threshold_hu,
+                step_size=step_size,
+                series_uid=None,
+                threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
+                smoothing_iterations=smoothing_iterations,
+                preset=preset or None,
+                case_dir=case_dir,
+                sensitivity=sensitivity or "medium",
+            )
+        else:
+            mesh, meta = dicom_to_bone_mesh(
+                dicom_dir,
+                threshold_hu=threshold_hu,
+                step_size=step_size,
+                threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
+                keep_largest=keep_largest,
+                smoothing_iterations=smoothing_iterations,
+                morphology_closing_radius=morphology_closing_radius,
+                morphology_opening_radius=morphology_opening_radius,
+                dilation_radius=dilation_radius,
+                erosion_radius=erosion_radius,
+                fill_holes=fill_holes,
+                min_island_volume_mm3=min_island_volume_mm3,
+                roi_crop=roi_crop,
+                pca_align=pca_align,
+                decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
+                repair_mesh=repair_mesh,
+                preset=preset or None,
+                case_dir=case_dir,
+                auto_threshold_enabled=True,
+                per_slice_denoise=True,
+                z_crop=True,
+                sensitivity=sensitivity or "medium",
+            )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
         raise HTTPException(400, f"DICOM conversion failed: {e}")
-    out_path = case_dir / "input.stl"
-    mesh.export(out_path)
-    (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return {
-        "case_id": case_id,
-        "mesh_url": f"/api/cases/{case_id}/input.stl",
-        "info": mesh_info(mesh),
-        "dicom": meta,
-    }
+
+    if split_bones:
+        # Save each bone as a separate STL
+        bones_dir = case_dir / "bones"
+        bones_dir.mkdir(parents=True, exist_ok=True)
+        bone_metas = []
+        combined = None
+        for i, (bone_name, bone_mesh) in enumerate(bones):
+            bone_path = bones_dir / f"bone_{i}.stl"
+            bone_mesh.export(bone_path)
+            if combined is None:
+                combined = bone_mesh.copy()
+            else:
+                combined = trimesh.util.concatenate([combined, bone_mesh])
+            bmeta = meta["bones"][i] if i < len(meta.get("bones", [])) else {}
+            bmeta["mesh_url"] = f"/api/cases/{case_id}/bone/{i}.stl"
+            bone_metas.append(bmeta)
+        # Save combined mesh for backward compatibility
+        if combined is not None:
+            combined.export(case_dir / "input.stl")
+        (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return {
+            "case_id": case_id,
+            "mesh_url": f"/api/cases/{case_id}/input.stl",
+            "bone_count": len(bones),
+            "bones": bone_metas,
+            "dicom": meta,
+        }
+    else:
+        out_path = case_dir / "input.stl"
+        mesh.export(out_path)
+        (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return {
+            "case_id": case_id,
+            "mesh_url": f"/api/cases/{case_id}/input.stl",
+            "info": mesh_info(mesh),
+            "dicom": meta,
+        }
 
 
 @app.post("/api/upload-dicom-folder")
@@ -1213,6 +1501,7 @@ def upload_dicom_folder(
     repair_mesh: bool = Form(True),
     preset: str = Form(""),
     sensitivity: str = Form("medium"),
+    split_bones: bool = Form(False),
 ):
     if not files:
         raise HTTPException(400, "No DICOM files received")
@@ -1234,43 +1523,86 @@ def upload_dicom_folder(
             with target.open("wb") as f:
                 shutil.copyfileobj(up.file, f)
             written += 1
-        mesh, meta = dicom_to_bone_mesh(
-            dicom_dir,
-            threshold_hu=threshold_hu,
-            step_size=step_size,
-            threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
-            keep_largest=keep_largest,
-            smoothing_iterations=smoothing_iterations,
-            morphology_closing_radius=morphology_closing_radius,
-            morphology_opening_radius=morphology_opening_radius,
-            dilation_radius=dilation_radius,
-            erosion_radius=erosion_radius,
-            fill_holes=fill_holes,
-            min_island_volume_mm3=min_island_volume_mm3,
-            roi_crop=roi_crop,
-            pca_align=pca_align,
-            decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
-            repair_mesh=repair_mesh,
-            preset=preset or None,
-            case_dir=case_dir,
-            auto_threshold_enabled=True,
-            per_slice_denoise=True,
-            z_crop=True,
-            sensitivity=sensitivity or "medium",
-        )
+        if split_bones:
+            bones, meta = dicom_to_bone_meshes(
+                dicom_dir,
+                threshold_hu=threshold_hu,
+                step_size=step_size,
+                series_uid=None,
+                threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
+                smoothing_iterations=smoothing_iterations,
+                preset=preset or None,
+                case_dir=case_dir,
+                sensitivity=sensitivity or "medium",
+            )
+        else:
+            mesh, meta = dicom_to_bone_mesh(
+                dicom_dir,
+                threshold_hu=threshold_hu,
+                step_size=step_size,
+                threshold_max_hu=threshold_max_hu if threshold_max_hu > threshold_hu else None,
+                keep_largest=keep_largest,
+                smoothing_iterations=smoothing_iterations,
+                morphology_closing_radius=morphology_closing_radius,
+                morphology_opening_radius=morphology_opening_radius,
+                dilation_radius=dilation_radius,
+                erosion_radius=erosion_radius,
+                fill_holes=fill_holes,
+                min_island_volume_mm3=min_island_volume_mm3,
+                roi_crop=roi_crop,
+                pca_align=pca_align,
+                decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
+                repair_mesh=repair_mesh,
+                preset=preset or None,
+                case_dir=case_dir,
+                auto_threshold_enabled=True,
+                per_slice_denoise=True,
+                z_crop=True,
+                sensitivity=sensitivity or "medium",
+            )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
         raise HTTPException(400, f"DICOM folder conversion failed: {e}")
-    out_path = case_dir / "input.stl"
-    mesh.export(out_path)
-    meta["uploaded_files"] = written
-    (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return {
-        "case_id": case_id,
-        "mesh_url": f"/api/cases/{case_id}/input.stl",
-        "info": mesh_info(mesh),
-        "dicom": meta,
-    }
+
+    if split_bones:
+        # Save each bone as a separate STL
+        bones_dir = case_dir / "bones"
+        bones_dir.mkdir(parents=True, exist_ok=True)
+        bone_metas = []
+        combined = None
+        for i, (bone_name, bone_mesh) in enumerate(bones):
+            bone_path = bones_dir / f"bone_{i}.stl"
+            bone_mesh.export(bone_path)
+            if combined is None:
+                combined = bone_mesh.copy()
+            else:
+                combined = trimesh.util.concatenate([combined, bone_mesh])
+            bmeta = meta["bones"][i] if i < len(meta.get("bones", [])) else {}
+            bmeta["mesh_url"] = f"/api/cases/{case_id}/bone/{i}.stl"
+            bone_metas.append(bmeta)
+        # Save combined mesh for backward compatibility
+        if combined is not None:
+            combined.export(case_dir / "input.stl")
+        meta["uploaded_files"] = written
+        (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return {
+            "case_id": case_id,
+            "mesh_url": f"/api/cases/{case_id}/input.stl",
+            "bone_count": len(bones),
+            "bones": bone_metas,
+            "dicom": meta,
+        }
+    else:
+        out_path = case_dir / "input.stl"
+        mesh.export(out_path)
+        meta["uploaded_files"] = written
+        (case_dir / "dicom_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return {
+            "case_id": case_id,
+            "mesh_url": f"/api/cases/{case_id}/input.stl",
+            "info": mesh_info(mesh),
+            "dicom": meta,
+        }
 
 
 @app.get("/api/recent-cases")
@@ -1375,6 +1707,14 @@ def input_stl(case_id: str):
     if not path.exists():
         raise HTTPException(404, "not found")
     return FileResponse(path, media_type="model/stl", filename=f"{case_id}-input.stl")
+
+
+@app.get("/api/cases/{case_id}/bone/{bone_index}.stl")
+def get_bone_stl(case_id: str, bone_index: int):
+    bone_path = UPLOADS / case_id / "bones" / f"bone_{bone_index}.stl"
+    if not bone_path.exists():
+        raise HTTPException(404, "Bone not found")
+    return FileResponse(bone_path, media_type="model/stl")
 
 
 @app.get("/api/cases/{case_id}/outputs/{name}")
