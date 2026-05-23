@@ -375,53 +375,63 @@ def load_dicom_series(dicom_dir: Path, selected_series_uid: Optional[str] = None
 
 
 SEGMENTATION_PRESETS = {
+    "whole_limb": {
+        "threshold_hu": 150,
+        "threshold_max_hu": 2500,
+        "morphology_closing_radius": 3,
+        "morphology_opening_radius": 1,
+        "fill_holes": True,
+        "min_island_volume_mm3": 50.0,
+        "smoothing_iterations": 3,
+        "decimation_target_faces": None,
+    },
     "long_bone": {
-        "threshold_hu": 250,
+        "threshold_hu": 200,
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 3,
         "morphology_opening_radius": 1,
         "fill_holes": True,
-        "min_island_volume_mm3": 1000.0,
+        "min_island_volume_mm3": 500.0,
         "smoothing_iterations": 3,
         "decimation_target_faces": None,
     },
     "skull": {
-        "threshold_hu": 200,
+        "threshold_hu": 180,
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 4,
         "morphology_opening_radius": 2,
         "fill_holes": True,
-        "min_island_volume_mm3": 500.0,
+        "min_island_volume_mm3": 200.0,
         "smoothing_iterations": 4,
         "decimation_target_faces": None,
     },
     "spine": {
-        "threshold_hu": 220,
+        "threshold_hu": 200,
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 2,
         "morphology_opening_radius": 1,
         "fill_holes": False,
-        "min_island_volume_mm3": 300.0,
+        "min_island_volume_mm3": 200.0,
         "smoothing_iterations": 2,
         "decimation_target_faces": None,
     },
     "pelvis": {
-        "threshold_hu": 250,
+        "threshold_hu": 200,
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 3,
         "morphology_opening_radius": 1,
         "fill_holes": True,
-        "min_island_volume_mm3": 800.0,
+        "min_island_volume_mm3": 500.0,
         "smoothing_iterations": 3,
         "decimation_target_faces": None,
     },
     "rib": {
-        "threshold_hu": 200,
+        "threshold_hu": 180,
         "threshold_max_hu": 3000,
         "morphology_closing_radius": 2,
         "morphology_opening_radius": 2,
         "fill_holes": False,
-        "min_island_volume_mm3": 200.0,
+        "min_island_volume_mm3": 100.0,
         "smoothing_iterations": 2,
         "decimation_target_faces": None,
     },
@@ -431,7 +441,7 @@ SEGMENTATION_PRESETS = {
         "morphology_closing_radius": 1,
         "morphology_opening_radius": 0,
         "fill_holes": True,
-        "min_island_volume_mm3": 300.0,
+        "min_island_volume_mm3": 200.0,
         "smoothing_iterations": 1,
         "decimation_target_faces": None,
     },
@@ -441,14 +451,14 @@ SEGMENTATION_PRESETS = {
         "morphology_closing_radius": 3,
         "morphology_opening_radius": 2,
         "fill_holes": True,
-        "min_island_volume_mm3": 500.0,
+        "min_island_volume_mm3": 300.0,
         "smoothing_iterations": 2,
         "decimation_target_faces": None,
     },
 }
 
 
-def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
+def _auto_threshold(vol: np.ndarray, sensitivity: str = "medium") -> tuple[float, float, list[str]]:
     """Automatically determine optimal HU threshold for bone segmentation.
 
     Uses multi-peak histogram analysis inspired by Bonnet (arXiv 2601.22576):
@@ -456,7 +466,10 @@ def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
     - Finds the valley between soft tissue and bone peaks as the threshold
     - Falls back to Otsu's method on the relevant range if valley detection fails
     - Uses the 99.9th percentile of bone voxels as threshold_max, capped at 3500 HU
-    - Warns if less than 1% of voxels are bone-like
+
+    sensitivity: "low" = higher threshold (less noise, may miss small/osteopenic bones)
+                  "medium" = balanced (default)
+                  "high" = lower threshold (captures more, including small bones)
 
     Returns (threshold_min, threshold_max, warnings).
     """
@@ -467,7 +480,7 @@ def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
     relevant = flat[(flat > -1100) & (flat < 4000)]
     if len(relevant) == 0:
         warnings.append("No voxels in relevant HU range; using defaults")
-        return 250.0, 3000.0, warnings
+        return 150.0, 2500.0, warnings
 
     total_voxels = float(len(relevant))
 
@@ -480,18 +493,10 @@ def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
     smoothed = uniform_filter1d(hist.astype(float), size=7)
 
     # --- Detect peaks ---
-    # Air peak: maximum in range -1050..-800 HU
-    air_mask = (bin_centers >= -1050) & (bin_centers <= -800)
     # Soft tissue peak: maximum in range -50..150 HU
     st_mask = (bin_centers >= -50) & (bin_centers <= 150)
-    # Bone peak: maximum in range 200..1500 HU
-    bone_peak_mask = (bin_centers >= 200) & (bin_centers <= 1500)
-
-    air_peak_hu = -1000.0
-    if air_mask.any():
-        air_idx = np.argmax(smoothed[air_mask])
-        air_bins = bin_centers[air_mask]
-        air_peak_hu = float(air_bins[air_idx])
+    # Bone peak: maximum in range 150..1500 HU (wider range for small animal bones)
+    bone_peak_mask = (bin_centers >= 150) & (bin_centers <= 1500)
 
     st_peak_hu = 50.0
     if st_mask.any():
@@ -499,70 +504,71 @@ def _auto_threshold(vol: np.ndarray) -> tuple[float, float, list[str]]:
         st_bins = bin_centers[st_mask]
         st_peak_hu = float(st_bins[st_idx])
 
-    bone_peak_hu = 500.0
+    bone_peak_hu = 400.0
     if bone_peak_mask.any():
         bp_idx = np.argmax(smoothed[bone_peak_mask])
         bp_bins = bin_centers[bone_peak_mask]
         bone_peak_hu = float(bp_bins[bp_idx])
 
     # --- Find valley between soft tissue and bone peaks ---
-    # Search range: from soft tissue peak + 50 to bone peak - 50, but at least 80..600
-    valley_lo = max(st_peak_hu + 50.0, 80.0)
-    valley_hi = min(bone_peak_hu - 50.0, 600.0)
+    # Adjust valley range based on sensitivity
+    sensitivity_offset = {"low": 80.0, "medium": 40.0, "high": 20.0}[sensitivity]
+    valley_lo = max(st_peak_hu + sensitivity_offset, 50.0)
+    valley_hi = min(bone_peak_hu - sensitivity_offset, 500.0)
     if valley_lo >= valley_hi:
-        valley_lo = 80.0
-        valley_hi = 600.0
+        valley_lo = 50.0
+        valley_hi = min(bone_peak_hu - 20.0, 500.0)
+        if valley_lo >= valley_hi:
+            valley_lo = 50.0
+            valley_hi = 300.0
 
     valley_search = (bin_centers >= valley_lo) & (bin_centers <= valley_hi)
-    threshold_min = 250.0  # default fallback
+    threshold_min = -1.0  # sentinel for Otsu fallback
 
     if valley_search.any():
         search_hist = smoothed.copy()
         search_hist[~valley_search] = np.inf
         valley_idx = np.argmin(search_hist)
         valley_val = float(bin_centers[valley_idx])
-        # Sanity check: valley should be between soft tissue and bone
+        # Valley should be between soft tissue and bone peaks
         if st_peak_hu < valley_val < bone_peak_hu:
             threshold_min = valley_val
-        else:
-            # Valley not between peaks — fall through to Otsu
-            threshold_min = -1.0  # sentinel for Otsu fallback
-    else:
-        threshold_min = -1.0  # sentinel for Otsu fallback
 
     # --- Otsu fallback ---
     if threshold_min < 0:
         try:
             from skimage.filters import threshold_otsu
-            # Apply Otsu on the range 50..1500 HU (bone-relevant)
-            bone_relevant = relevant[(relevant > 50) & (relevant < 1500)]
+            # Apply Otsu on the range -100..1500 HU (broader for small animals)
+            bone_relevant = relevant[(relevant > -100) & (relevant < 1500)]
             if len(bone_relevant) > 100:
                 threshold_min = float(threshold_otsu(bone_relevant))
                 warnings.append(f"Valley detection failed; Otsu fallback threshold={threshold_min:.1f}")
             else:
-                threshold_min = 250.0
-                warnings.append("Valley detection failed; Otsu skipped (too few voxels); using default 250")
+                threshold_min = 150.0
+                warnings.append("Valley/Otsu failed; using default 150")
         except Exception:
-            threshold_min = 250.0
-            warnings.append("Valley detection and Otsu both failed; using default 250")
+            threshold_min = 150.0
+            warnings.append("Valley/Otsu failed; using default 150")
 
-    # Clamp to reasonable bone range
-    threshold_min = max(150.0, min(threshold_min, 500.0))
+    # Sensitivity-based floor: don't go too low even with high sensitivity
+    min_floor = {"low": 200.0, "medium": 150.0, "high": 100.0}[sensitivity]
+    threshold_min = max(min_floor, min(threshold_min, 500.0))
 
-    # --- threshold_max: 99.9th percentile of bone voxels, capped at 3500 HU ---
+    # --- threshold_max: 99.9th percentile of bone voxels ---
     bone_voxels = relevant[relevant > threshold_min]
     if len(bone_voxels) > 100:
         threshold_max = float(np.percentile(bone_voxels, 99.9))
+        threshold_max = max(threshold_max, 800.0)  # at least 800 HU
         threshold_max = min(threshold_max, 3500.0)
     else:
-        threshold_max = 3000.0
+        threshold_max = 2500.0
 
-    # --- Minimum bone voxel check ---
+    # --- Bone voxel check ---
     bone_pct = (len(bone_voxels) / total_voxels) * 100.0
-    if bone_pct < 1.0:
+    if bone_pct < 0.5:
         warnings.append(
             f"Bone-like voxels are only {bone_pct:.2f}% of volume — "
-            f"threshold may be too high or scan may not contain bone"
+            f"try lower threshold or check CT protocol"
         )
 
     return threshold_min, threshold_max, warnings
@@ -832,6 +838,7 @@ def dicom_to_bone_mesh(
     auto_threshold_enabled: bool = True,
     per_slice_denoise: bool = True,
     z_crop: bool = True,
+    sensitivity: str = "medium",
 ) -> tuple[trimesh.Trimesh, dict]:
     """Convert DICOM CT series to bone mesh with Segmentation Engine v3.
 
@@ -880,7 +887,7 @@ def dicom_to_bone_mesh(
     # --- Auto-threshold: adaptive HU threshold from histogram analysis ---
     auto_info: dict = {}
     if auto_threshold_enabled:
-        auto_tmin, auto_tmax, auto_warnings = _auto_threshold(vol)
+        auto_tmin, auto_tmax, auto_warnings = _auto_threshold(vol, sensitivity=sensitivity)
         # Only override if user didn't explicitly set a custom threshold
         if threshold_hu == 250.0 or (preset and preset.lower() in SEGMENTATION_PRESETS):
             threshold_hu = auto_tmin
@@ -1125,6 +1132,7 @@ def upload_dicom(
     decimation_target_faces: int = Form(0),
     repair_mesh: bool = Form(True),
     preset: str = Form(""),
+    sensitivity: str = Form("medium"),
 ):
     ext = Path(file.filename or "dicom.zip").suffix.lower()
     if ext not in {".zip", ".dcm", ""}:
@@ -1168,6 +1176,7 @@ def upload_dicom(
             auto_threshold_enabled=True,
             per_slice_denoise=True,
             z_crop=True,
+            sensitivity=sensitivity or "medium",
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
@@ -1203,6 +1212,7 @@ def upload_dicom_folder(
     decimation_target_faces: int = Form(0),
     repair_mesh: bool = Form(True),
     preset: str = Form(""),
+    sensitivity: str = Form("medium"),
 ):
     if not files:
         raise HTTPException(400, "No DICOM files received")
@@ -1246,6 +1256,7 @@ def upload_dicom_folder(
             auto_threshold_enabled=True,
             per_slice_denoise=True,
             z_crop=True,
+            sensitivity=sensitivity or "medium",
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)

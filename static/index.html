@@ -61,7 +61,7 @@
       <div class="hint">For full CT: select DICOM folder</div>
       <input id="folderInput" type="file" webkitdirectory directory multiple />
       <div class="row">
-        <div><label>Bone threshold HU</label><input id="dicomThreshold" type="number" step="25" value="250"></div>
+        <div><label>Bone threshold HU</label><input id="dicomThreshold" type="number" step="25" value="150"></div>
         <div><label>Step size</label><input id="dicomStep" type="number" step="1" value="1"></div>
       </div>
       <button onclick="uploadDicom()">Upload DICOM ZIP/.dcm → bone STL</button>
@@ -75,6 +75,7 @@
     <label>Anatomy preset</label>
     <select id="segPreset" onchange="applyPresetUI()">
       <option value="">Custom (no preset)</option>
+      <option value="whole_limb">Whole limb (all bones, tarso, rotula)</option>
       <option value="long_bone">Long bone (femur, tibia, humerus)</option>
       <option value="skull">Skull / Maxillofacial</option>
       <option value="spine">Spine</option>
@@ -83,13 +84,22 @@
     </select>
     <label>DICOM Series</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
     <div class="row">
-      <div><label>HU min bone</label><input id="segHuMin" type="number" step="25" value="250"></div>
-      <div><label>HU max / metal cutoff</label><input id="segHuMax" type="number" step="100" value="3000"></div>
+      <div><label>HU min bone</label><input id="segHuMin" type="number" step="25" value="150"></div>
+      <div><label>HU max / metal cutoff</label><input id="segHuMax" type="number" step="100" value="2500"></div>
     </div>
     <div class="row3">
       <div><label>Step</label><input id="segStep" type="number" step="1" value="1"></div>
       <div><label>Smooth</label><input id="segSmooth" type="number" step="1" value="2"></div>
       <div><label>Largest</label><select id="segLargest"><option value="true">Yes</option><option value="false">No</option></select></div>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <div><label>Segmentation sensitivity</label>
+        <select id="segSensitivity">
+          <option value="high">High — capture all bones (tarso, rotula, small)</option>
+          <option value="medium" selected>Medium — balanced</option>
+          <option value="low">Low — dense bone only (less noise)</option>
+        </select>
+      </div>
     </div>
     <details>
       <summary style="color:var(--muted);cursor:pointer;margin-top:10px;font-size:13px">⚙️ Segmentation v2 — Morphology & Cleanup</summary>
@@ -339,6 +349,7 @@ window.uploadDicom=async()=>{
   fd.append('decimation_target_faces',$('segDecimate').value||'0');
   fd.append('repair_mesh',$('segRepair').value);
   fd.append('preset',$('segPreset').value||'');
+  fd.append('sensitivity',$('segSensitivity').value||'medium');
   const r=await fetch('/api/upload-dicom',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM conversion failed');return}
   caseId=j.case_id; enableCadButtons();
@@ -369,6 +380,7 @@ window.uploadDicomFolder=async()=>{
   fd.append('decimation_target_faces',$('segDecimate').value||'0');
   fd.append('repair_mesh',$('segRepair').value);
   fd.append('preset',$('segPreset').value||'');
+  fd.append('sensitivity',$('segSensitivity').value||'medium');
   const r=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd}); const j=await r.json();
   if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM folder conversion failed');return}
   caseId=j.case_id; enableCadButtons();
@@ -396,11 +408,14 @@ window.loadSample=async()=>{
 window.applyPresetUI=()=>{
   const p=$('segPreset').value;
   const presets={
-    long_bone:{threshold_hu:250,threshold_max_hu:3000,closing:2,opening:0,fill_holes:true,min_island:500},
-    skull:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:200},
-    spine:{threshold_hu:220,threshold_max_hu:3000,closing:2,opening:1,fill_holes:true,min_island:100},
-    cortical:{threshold_hu:400,threshold_max_hu:3000,closing:1,opening:0,fill_holes:true,min_island:300},
-    metal:{threshold_hu:200,threshold_max_hu:8000,closing:3,opening:2,fill_holes:true,min_island:500},
+    whole_limb:{threshold_hu:150,threshold_max_hu:2500,closing:3,opening:1,fill_holes:true,min_island:50,sensitivity:"high"},
+    long_bone:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:500,sensitivity:"medium"},
+    skull:{threshold_hu:180,threshold_max_hu:3000,closing:4,opening:2,fill_holes:true,min_island:200,sensitivity:"medium"},
+    spine:{threshold_hu:200,threshold_max_hu:3000,closing:2,opening:1,fill_holes:false,min_island:200,sensitivity:"medium"},
+    pelvis:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:500,sensitivity:"medium"},
+    rib:{threshold_hu:180,threshold_max_hu:3000,closing:2,opening:2,fill_holes:false,min_island:100,sensitivity:"high"},
+    cortical:{threshold_hu:400,threshold_max_hu:3000,closing:1,opening:0,fill_holes:true,min_island:200,sensitivity:"low"},
+    metal:{threshold_hu:200,threshold_max_hu:8000,closing:3,opening:2,fill_holes:true,min_island:300,sensitivity:"medium"},
   };
   if(!p||!presets[p])return;
   const c=presets[p];
