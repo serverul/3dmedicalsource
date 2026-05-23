@@ -80,12 +80,17 @@ canvas{display:block}
 
     <!-- Upload -->
     <div class="section">
-      <label>DICOM Upload</label>
+      <label>DICOM Folder Upload</label>
       <input type="file" id="dicom-input" webkitdirectory directory multiple>
       <div class="section-row">
         <label style="font-size:11px"><input type="checkbox" id="split-bones" checked> Split bones (watershed)</label>
       </div>
-      <button onclick="uploadDicom()">Upload & Segment</button>
+      <button onclick="uploadDicom()">Upload DICOM Folder</button>
+      <div style="margin-top:8px;border-top:1px solid #222;padding-top:8px">
+        <label>STL File Upload</label>
+        <input type="file" id="stl-input" accept=".stl,.obj,.ply">
+        <button onclick="uploadSTL()">Upload STL/OBJ/PLY</button>
+      </div>
     </div>
 
     <!-- Tools -->
@@ -681,6 +686,59 @@ window.toggleVis = toggleVis;
 // ============================================================
 //  UPLOAD
 // ============================================================
+
+window.uploadSTL = async function() {
+  const input = document.getElementById('stl-input');
+  if (!input.files.length) { alert('Select an STL/OBJ/PLY file'); return; }
+  const loading = document.getElementById('loading');
+  const progress = document.getElementById('load-progress');
+  loading.classList.remove('hidden');
+  progress.textContent = 'Uploading mesh...';
+
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+
+  try {
+    const resp = await fetch('/api/upload', {method: 'POST', body: fd});
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({detail: resp.statusText}));
+      throw new Error(e.detail || 'Upload failed');
+    }
+    const data = await resp.json();
+    caseId = data.case_id;
+
+    gizmo.detach();
+    objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+    objects = []; selectedIdx = -1;
+
+    const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
+    const loader = new STLLoader();
+    const geo = await new Promise((resolve, reject) => {
+      loader.load(data.mesh_url, resolve, undefined, reject);
+    });
+    geo.computeVertexNormals();
+    const color = COLORS[0];
+    const mat = new THREE.MeshStandardMaterial({color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'mesh_0';
+    scene.add(mesh);
+    objects.push({
+      mesh, name: input.files[0].name, color,
+      origPos: mesh.position.clone(), visible: true, transparent: false,
+      caseId: caseId, boneIndex: 0
+    });
+
+    fitCamera();
+    selectObject(0);
+    setStatus('Loaded: ' + input.files[0].name + ' — case ' + caseId);
+  } catch(e) {
+    console.error('[stl] ERROR:', e);
+    setStatus('Error: ' + e.message);
+  } finally {
+    loading.classList.add('hidden');
+  }
+};
+
 window.uploadDicom = async function() {
   const input = document.getElementById('dicom-input');
   if (!input.files.length) { alert('Select a DICOM folder'); return; }
@@ -689,62 +747,78 @@ window.uploadDicom = async function() {
   loading.classList.remove('hidden');
 
   const splitBones = document.getElementById('split-bones').checked;
-  const fileCount = input.files.length;
-  progress.textContent = `Uploading ${fileCount} DICOM files...`;
-  console.log('[upload] Starting upload of', fileCount, 'files');
+  const allFiles = [...input.files];
+  const fileCount = allFiles.length;
+  const CHUNK_SIZE = 50;
+  const totalChunks = Math.ceil(fileCount / CHUNK_SIZE);
+  const uploadId = 'upload_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
 
-  const fd = new FormData();
-  let added = 0;
-  for (const f of input.files) {
-    fd.append('files', f, f.webkitRelativePath || f.name);
-    added++;
-  }
-  fd.append('split_bones', splitBones ? 'true' : 'false');
-  fd.append('sensitivity', 'high');
+  console.log('[upload] Starting chunked upload:', fileCount, 'files in', totalChunks, 'chunks');
 
   try {
-    progress.textContent = 'Segmenting bones (30-120s)...';
-    console.log('[upload] Sending to /api/upload-dicom-folder...');
-    const resp = await fetch('/api/upload-dicom-folder', {method: 'POST', body: fd});
-    console.log('[upload] Response status:', resp.status);
-    if (!resp.ok) {
-      const e = await resp.json().catch(() => ({detail: resp.statusText}));
-      throw new Error(e.detail || 'Upload failed: ' + resp.status);
+    for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+      const start = chunkIdx * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, fileCount);
+      const chunk = allFiles.slice(start, end);
+
+      progress.textContent = `Uploading chunk ${chunkIdx+1}/${totalChunks} (${start}-${end} of ${fileCount})...`;
+
+      const fd = new FormData();
+      for (const f of chunk) {
+        fd.append('files', f, f.webkitRelativePath || f.name);
+      }
+      fd.append('chunk_index', chunkIdx.toString());
+      fd.append('total_chunks', totalChunks.toString());
+      fd.append('upload_id', uploadId);
+      fd.append('split_bones', splitBones ? 'true' : 'false');
+      fd.append('sensitivity', 'high');
+
+      console.log('[upload] Sending chunk', chunkIdx+1, '/', totalChunks);
+      const resp = await fetch('/api/upload-dicom-chunk', {method: 'POST', body: fd});
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({detail: resp.statusText}));
+        throw new Error(e.detail || 'Chunk ' + chunkIdx + ' failed: ' + resp.status);
+      }
+      const data = await resp.json();
+      console.log('[upload] Chunk', chunkIdx+1, 'response:', data.status);
+
+      // If last chunk returned complete result, load bones
+      if (data.status === 'complete') {
+        progress.textContent = `Loading ${data.bone_count} bone(s)...`;
+        caseId = data.case_id;
+
+        gizmo.detach();
+        objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+        objects = []; selectedIdx = -1;
+
+        for (let i = 0; i < data.bone_count; i++) {
+          progress.textContent = `Loading bone ${i+1}/${data.bone_count}...`;
+          const url = `/api/cases/${caseId}/bone/${i}.stl`;
+          const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
+          const loader = new STLLoader();
+          const geo = await new Promise((resolve, reject) => {
+            loader.load(url, resolve, undefined, reject);
+          });
+          geo.computeVertexNormals();
+          const color = COLORS[i % COLORS.length];
+          const mat = new THREE.MeshStandardMaterial({color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.name = `bone_${i}`;
+          scene.add(mesh);
+          objects.push({
+            mesh, name: data.bones[i]?.name || `Bone ${i+1}`, color,
+            origPos: mesh.position.clone(), visible: true, transparent: false,
+            caseId: caseId, boneIndex: i
+          });
+        }
+
+        fitCamera();
+        if (objects.length > 0) selectObject(0);
+        setStatus(`Loaded ${data.bone_count} bone(s) — case ${caseId}`);
+      } else if (data.status === 'segmentation_error') {
+        throw new Error('Segmentation failed: ' + data.error);
+      }
     }
-    const data = await resp.json();
-    console.log('[upload] Success:', data);
-
-    caseId = data.case_id;
-    progress.textContent = `Loading ${data.bone_count} bone(s)...`;
-
-    gizmo.detach();
-    objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
-    objects = []; selectedIdx = -1;
-
-    for (let i = 0; i < data.bone_count; i++) {
-      progress.textContent = `Loading bone ${i+1}/${data.bone_count}...`;
-      const url = `/api/cases/${caseId}/bone/${i}.stl`;
-      const {STLLoader} = await import('three/addons/loaders/STLLoader.js');
-      const loader = new STLLoader();
-      const geo = await new Promise((resolve, reject) => {
-        loader.load(url, resolve, undefined, reject);
-      });
-      geo.computeVertexNormals();
-      const color = COLORS[i % COLORS.length];
-      const mat = new THREE.MeshStandardMaterial({color, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide});
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = `bone_${i}`;
-      scene.add(mesh);
-      objects.push({
-        mesh, name: data.bones[i]?.name || `Bone ${i+1}`, color,
-        origPos: mesh.position.clone(), visible: true, transparent: false,
-        caseId: caseId, boneIndex: i
-      });
-    }
-
-    fitCamera();
-    if (objects.length > 0) selectObject(0);
-    setStatus(`Loaded ${data.bone_count} bone(s) — case ${caseId}`);
 
   } catch(e) {
     console.error('[upload] ERROR:', e);
