@@ -684,39 +684,93 @@ window.uploadSTL=async function(){
   }catch(e){setStatus('Error: '+e.message);}finally{loading.classList.add('hidden');}
 };
 
-window.uploadDicom=async function(){
-  const input=document.getElementById('dicom-input');
-  const files=[...input.files];
-  if(!files.length){alert('Select DICOM folder first.');return;}
-  const loading=document.getElementById('loading');
-  const progress=document.getElementById('load-progress');
-  loading.classList.remove('hidden');
-  progress.textContent='Uploading '+files.length+' files...';
-  const fd=new FormData();
-  for(const f of files){fd.append('files',f,f.webkitRelativePath||f.name);}
-  fd.append('split_bones',document.getElementById('split-bones').checked?'true':'false');
-  fd.append('sensitivity','high');
+window.uploadDicom=function(){
+  var input=document.getElementById("dicom-input");
+  var files=input.files;
+  if(!files.length){alert("Select DICOM folder first.");return;}
+  var loading=document.getElementById("loading");
+  var progress=document.getElementById("load-progress");
+  loading.classList.remove("hidden");
+  progress.textContent="Uploading "+files.length+" files...";
+
+  var fd=new FormData();
+  for(var i=0;i<files.length;i++){fd.append("files",files[i],files[i].webkitRelativePath||files[i].name);}
+  fd.append("split_bones",document.getElementById("split-bones").checked?"true":"false");
+  fd.append("sensitivity","high");
+
+  var xhr=new XMLHttpRequest();
+  xhr.open("POST","/api/upload-dicom-folder",true);
+
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var pct=Math.round(e.loaded/e.total*100);
+      progress.textContent="Uploading: "+pct+"% ("+Math.round(e.loaded/1024/1024)+"MB / "+Math.round(e.total/1024/1024)+"MB)";
+    }
+  };
+
+  xhr.onload=function(){
+    if(xhr.status>=200&&xhr.status<300){
+      try{
+        var data=JSON.parse(xhr.responseText);
+        console.log("[upload] Success:",data);
+        window._handleUploadResponse(data,loading,progress);
+      }catch(err){
+        console.error("[upload] Parse error:",err);
+        setStatus("Error parsing response");
+        loading.classList.add("hidden");
+      }
+    }else{
+      console.error("[upload] HTTP",xhr.status,xhr.responseText);
+      setStatus("Upload failed: HTTP "+xhr.status);
+      loading.classList.add("hidden");
+    }
+  };
+
+  xhr.onerror=function(){
+    console.error("[upload] Network error");
+    setStatus("Network error during upload");
+    loading.classList.add("hidden");
+  };
+
+  xhr.ontimeout=function(){
+    console.error("[upload] Timeout");
+    setStatus("Upload timed out");
+    loading.classList.add("hidden");
+  };
+
+  xhr.timeout=600000; // 10 minutes
+  console.log("[upload] Sending "+files.length+" files via XHR...");
+  xhr.send(fd);
+};
+
+window._handleUploadResponse=async function(data,loading,progress){
   try{
-    progress.textContent='Segmenting bones (30-120s)...';
-    const resp=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd});
-    if(!resp.ok){const e=await resp.json().catch(()=>({detail:resp.statusText}));throw new Error(e.detail||'Upload failed: '+resp.status);}
-    const data=await resp.json();
-    caseId=data.case_id;progress.textContent='Loading '+data.bone_count+' bone(s)...';
-    gizmo.detach();objects.forEach(o=>{scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();});objects=[];selectedIdx=-1;
-    for(let i=0;i<data.bone_count;i++){
-      progress.textContent='Loading bone '+(i+1)+'/'+data.bone_count+'...';
-      const{STLLoader}=await import('three/addons/loaders/STLLoader.js');
-      const loader=new STLLoader();
-      const geo=await new Promise((res,rej)=>{loader.load('/api/cases/'+caseId+'/bone/'+i+'.stl',res,undefined,rej);});
+    caseId=data.case_id;
+    progress.textContent="Loading "+data.bone_count+" bone(s)...";
+    gizmo.detach();
+    objects.forEach(function(o){scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();});
+    objects=[];selectedIdx=-1;
+
+    for(var i=0;i<data.bone_count;i++){
+      progress.textContent="Loading bone "+(i+1)+"/"+data.bone_count+"...";
+      var url="/api/cases/"+caseId+"/bone/"+i+".stl";
+      var mod=await import("three/addons/loaders/STLLoader.js");
+      var loader=new mod.STLLoader();
+      var geo=await new Promise(function(res,rej){loader.load(url,res,undefined,rej);});
       geo.computeVertexNormals();
-      const color=COLORS[i%COLORS.length];
-      const mat=new THREE.MeshStandardMaterial({color,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
-      const mesh=new THREE.Mesh(geo,mat);mesh.name='bone_'+i;scene.add(mesh);
-      objects.push({mesh,name:(data.bones[i]&&data.bones[i].name)||('Bone '+(i+1)),color,origPos:mesh.position.clone(),visible:true,transparent:false,caseId,boneIndex:i});
+      var color=COLORS[i%COLORS.length];
+      var mat=new THREE.MeshStandardMaterial({color:color,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
+      var mesh=new THREE.Mesh(geo,mat);mesh.name="bone_"+i;scene.add(mesh);
+      objects.push({mesh:mesh,name:(data.bones[i]&&data.bones[i].name)||("Bone "+(i+1)),color:color,origPos:mesh.position.clone(),visible:true,transparent:false,caseId:caseId,boneIndex:i});
     }
     fitCamera();if(objects.length>0)selectObject(0);
-    setStatus('Loaded '+data.bone_count+' bone(s) — case '+caseId);
-  }catch(e){setStatus('Error: '+e.message);}finally{loading.classList.add('hidden');}
+    setStatus("Loaded "+data.bone_count+" bone(s) — case "+caseId);
+  }catch(e){
+    console.error("[upload] Load error:",e);
+    setStatus("Error loading bones: "+e.message);
+  }finally{
+    loading.classList.add("hidden");
+  }
 };
 
 function fitCamera(){
