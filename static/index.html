@@ -1,847 +1,635 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3DMedicalPlanner</title>
-  <style>
-    :root{--bg:#080b12;--panel:#111827;--panel2:#0d1320;--line:#263247;--fg:#e8eefc;--muted:#92a2bd;--accent:#38bdf8;--ok:#22c55e;--bad:#ef4444;--warn:#f59e0b}
-    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,#18223b,#080b12 45%);color:var(--fg);font:14px/1.45 Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif}
-    header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#070b13cc;backdrop-filter:blur(8px)}
-    h1{margin:0;font-size:22px}.sub{color:var(--muted);font-size:13px}
-    .wrap{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px;height:calc(100vh - 75px)}
-    .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;overflow:auto}
-    .viewer{position:relative;min-height:500px;padding:0;overflow:hidden}.viewer canvas{display:block;width:100%;height:100%}
-    label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px}
-    input,select{width:100%;padding:10px;border-radius:10px;background:#07101f;color:var(--fg);border:1px solid #2b3a55;outline:none}
-    input:focus,select:focus{border-color:var(--accent)}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-    button{width:100%;padding:11px 12px;border:0;border-radius:12px;background:var(--accent);color:#06101d;font-weight:800;cursor:pointer;margin-top:12px}
-    button.secondary{background:#243653;color:#d9e7ff}button:disabled{opacity:.5;cursor:wait}
-    .drop{border:1px dashed #49617f;border-radius:14px;padding:14px;text-align:center;background:#07101f;color:var(--muted)}.drop input{border:0;background:transparent;padding:8px}
-    .status{margin-top:12px;padding:10px;border-radius:12px;background:#07101f;border:1px solid var(--line)}
-    .pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.ok{background:#12351f;color:#85efa5}.bad{background:#431b1b;color:#ff9b9b}.warn{background:#4a330d;color:#ffd17a}
-    pre{white-space:pre-wrap;word-break:break-word;background:#060c17;border:1px solid var(--line);border-radius:12px;padding:10px;color:#d9e7ff;max-height:260px;overflow:auto}
-    .downloads{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}.downloads a{display:block;text-decoration:none;color:#c9e9ff;background:#14233a;border:1px solid #2e4568;padding:9px;border-radius:10px}
-    .hint{font-size:12px;color:var(--muted);margin-top:8px}
-    .toolbar{position:absolute;left:12px;top:12px;z-index:2;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--muted)}
-    .undo-bar{position:absolute;left:12px;top:12px;z-index:2;display:flex;gap:6px;align-items:center;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:6px 10px}
-    .undo-btn{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--muted);padding:4px 10px;cursor:pointer;font-size:16px;font-weight:700;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px}
-    .undo-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:#0d1a2e}
-    .undo-btn:disabled{opacity:.25;cursor:not-allowed}
-    .undo-label{color:var(--muted);font-size:11px;margin-left:4px;white-space:nowrap}
-    .history-panel{position:absolute;left:12px;top:56px;z-index:2;background:#070b13ee;border:1px solid var(--line);border-radius:12px;padding:10px;min-width:260px;max-height:320px;overflow:auto;display:none}
-    .history-panel.open{display:block}
-    .hist-item{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #1a2538;font-size:12px;color:var(--muted)}
-    .hist-item:last-child{border-bottom:none}
-    .hist-name{color:#c9e7ff;font-weight:600}
-    .hist-time{color:#6b7fa3;font-size:10px}
-    .hist-empty{color:var(--muted);font-size:12px;text-align:center;padding:8px}
-    .mpr-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-    .mpr-canvas-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:1}
-    .mpr-canvas-wrap canvas{width:100%;height:100%;display:block}
-    .mpr-label{position:absolute;bottom:4px;left:4px;font-size:10px;color:var(--accent);background:#000000aa;padding:2px 6px;border-radius:4px}
-    .mpr-controls{display:flex;gap:8px;align-items:center;margin-top:8px}
-    .mpr-controls input[type=range]{flex:1}
-    .mpr-controls span{font-size:11px;color:var(--muted);min-width:60px}
-    .bone-panel { margin-top: 8px; }
-    .bone-list { max-height: 300px; overflow: auto; }
-    .bone-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; transition: background .15s; border: 1px solid transparent; }
-    .bone-item:hover { background: #1a2538; }
-    .bone-item.selected { background: #1e3a5f; border-color: var(--accent); }
-    .bone-color { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
-    .bone-name { flex: 1; font-size: 13px; font-weight: 600; color: #c9e7ff; }
-    .bone-info { font-size: 11px; color: var(--muted); }
-    .bone-vis, .bone-trans { cursor: pointer; font-size: 16px; padding: 2px; }
-    .bone-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px; }
-    .small-btn { padding: 6px 8px !important; font-size: 12px !important; margin: 0 !important; border-radius: 8px !important; }
-    @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}.viewer{height:60vh}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3DMedicalPlanner</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; overflow: hidden; height: 100vh; }
+#app { display: flex; height: 100vh; }
+
+/* Left sidebar */
+#sidebar {
+  width: 280px; min-width: 280px; background: #12121a;
+  border-right: 1px solid #2a2a3a; display: flex; flex-direction: column;
+  overflow-y: auto; z-index: 10;
+}
+#sidebar h2 { font-size: 13px; color: #888; padding: 12px 14px 6px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #1e1e2e; }
+.section { padding: 8px 14px; border-bottom: 1px solid #1e1e2e; }
+.section label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+.section input, .section select, .section button {
+  width: 100%; padding: 6px 8px; background: #1a1a2a; border: 1px solid #333;
+  color: #e0e0e0; border-radius: 4px; font-size: 12px; margin-bottom: 6px;
+}
+.section button { background: #2a5a3a; border-color: #3a7a4a; cursor: pointer; font-weight: 600; }
+.section button:hover { background: #3a7a4a; }
+.section button.danger { background: #5a2a2a; border-color: #7a3a3a; }
+.section button.danger:hover { background: #7a3a3a; }
+.section-row { display: flex; gap: 6px; }
+.section-row > * { flex: 1; }
+
+/* Bone list */
+#bone-list { flex: 1; overflow-y: auto; }
+.bone-item {
+  padding: 8px 14px; cursor: pointer; border-bottom: 1px solid #1a1a2a;
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  transition: background 0.15s;
+}
+.bone-item:hover { background: #1a1a2a; }
+.bone-item.selected { background: #1a2a3a; border-left: 3px solid #4a9aff; }
+.bone-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.bone-name { flex: 1; }
+.bone-info { font-size: 10px; color: #666; }
+
+/* Status bar */
+#status {
+  padding: 8px 14px; background: #0e0e16; border-top: 1px solid #2a2a3a;
+  font-size: 11px; color: #666; display: flex; justify-content: space-between;
+}
+
+/* Main 3D area */
+#viewer { flex: 1; position: relative; }
+canvas { display: block; }
+
+/* Gizmo toolbar */
+#gizmo-toolbar {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px; background: rgba(20,20,30,0.85); padding: 4px 8px;
+  border-radius: 6px; border: 1px solid #333; z-index: 10;
+}
+#gizmo-toolbar button {
+  padding: 6px 12px; background: transparent; border: 1px solid transparent;
+  color: #aaa; cursor: pointer; border-radius: 4px; font-size: 12px; font-weight: 600;
+}
+#gizmo-toolbar button:hover { background: #2a2a3a; }
+#gizmo-toolbar button.active { background: #1a3a5a; color: #4a9aff; border-color: #4a9aff; }
+
+/* Hotkey help */
+#hotkeys {
+  position: absolute; bottom: 12px; right: 12px;
+  background: rgba(20,20,30,0.85); padding: 8px 12px; border-radius: 6px;
+  border: 1px solid #333; font-size: 10px; color: #666; z-index: 10;
+  max-width: 220px;
+}
+#hotkeys kbd { background: #2a2a3a; padding: 1px 4px; border-radius: 3px; color: #aaa; }
+
+/* Loading overlay */
+#loading {
+  position: absolute; inset: 0; background: rgba(10,10,15,0.9);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 100; font-size: 16px;
+}
+#loading.hidden { display: none; }
+.spinner { width: 40px; height: 40px; border: 3px solid #333; border-top-color: #4a9aff;
+  border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#load-progress { margin-top: 8px; font-size: 12px; color: #666; }
+</style>
 </head>
 <body>
-<header>
-  <div><h1>🦴 3DMedicalPlanner</h1><div class="sub">3D CT-based surgical CAD · patient-specific planning</div></div>
-  <div class="sub">research prototype · mm units · v0.1</div>
-</header>
-<div class="wrap">
-  <aside class="panel">
-    <h2>1. Import</h2>
-    <div class="drop">
-      <input id="file" type="file" accept=".stl,.obj,.ply,.zip,.dcm" />
-      <button onclick="uploadMesh()">Upload STL/OBJ/PLY</button>
-      <div class="hint">For full CT: select DICOM folder</div>
-      <input id="folderInput" type="file" webkitdirectory directory multiple />
-      <div class="row">
-        <div><label>Bone threshold HU</label><input id="dicomThreshold" type="number" step="25" value="150"></div>
-        <div><label>Step size</label><input id="dicomStep" type="number" step="1" value="1"></div>
-      </div>
-      <div style="margin-top:8px">
-        <label><input type="checkbox" id="splitBones" checked> Split into individual bones (recommended)</label>
-      </div>
-      <button onclick="uploadDicom()">Upload DICOM ZIP/.dcm → bone STL</button>
-      <button onclick="uploadDicomFolder()">Upload DICOM folder → bone STL</button>
-      <button class="secondary" onclick="loadSample()">Load demo bone</button>
-      <button class="secondary" onclick="loadLatestCase()">Load latest case</button>
-    </div>
-    <div id="uploadStatus" class="status"><span class="pill warn">idle</span> Waiting for mesh.</div>
+<div id="app">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <h2>🦴 3DMedicalPlanner</h2>
 
-    <h2>2. Segmentation</h2>
-    <label>Anatomy preset</label>
-    <select id="segPreset" onchange="applyPresetUI()">
-      <option value="">Custom (no preset)</option>
-      <option value="whole_limb">Whole limb (all bones, tarso, rotula)</option>
-      <option value="long_bone">Long bone (femur, tibia, humerus)</option>
-      <option value="skull">Skull / Maxillofacial</option>
-      <option value="spine">Spine</option>
-      <option value="cortical">Dense cortical bone</option>
-      <option value="metal">With metal artifacts</option>
-    </select>
-    <label>DICOM Series</label><select id="seriesSelect"><option value="">auto / largest series</option></select>
-    <div class="row">
-      <div><label>HU min bone</label><input id="segHuMin" type="number" step="25" value="150"></div>
-      <div><label>HU max / metal cutoff</label><input id="segHuMax" type="number" step="100" value="2500"></div>
+    <div class="section">
+      <label>DICOM Upload</label>
+      <input type="file" id="dicom-input" webkitdirectory directory multiple accept=".dcm,.DCM,.ima,.IMA,application/dicom">
+      <div class="section-row">
+        <label><input type="checkbox" id="split-bones" checked> Split bones</label>
+      </div>
+      <button onclick="uploadDicom()">Upload & Segment</button>
     </div>
-    <div class="row3">
-      <div><label>Step</label><input id="segStep" type="number" step="1" value="1"></div>
-      <div><label>Smooth</label><input id="segSmooth" type="number" step="1" value="2"></div>
-      <div><label>Largest</label><select id="segLargest"><option value="true">Yes</option><option value="false">No</option></select></div>
-    </div>
-    <div class="row" style="margin-top:4px">
-      <div><label>Segmentation sensitivity</label>
-        <select id="segSensitivity">
-          <option value="high">High — capture all bones (tarso, rotula, small)</option>
-          <option value="medium" selected>Medium — balanced</option>
-          <option value="low">Low — dense bone only (less noise)</option>
-        </select>
+
+    <div class="section" id="transform-section" style="display:none">
+      <label>Transform — <span id="selected-bone-name">none</span></label>
+      <div class="section-row">
+        <div><label>X</label><input type="number" id="tx" value="0" step="1" onchange="applyTransform()"></div>
+        <div><label>Y</label><input type="number" id="ty" value="0" step="1" onchange="applyTransform()"></div>
+        <div><label>Z</label><input type="number" id="tz" value="0" step="1" onchange="applyTransform()"></div>
+      </div>
+      <div class="section-row">
+        <button onclick="resetTransform()">Reset</button>
+        <button class="danger" onclick="deleteBone()">Delete</button>
       </div>
     </div>
-    <details>
-      <summary style="color:var(--muted);cursor:pointer;margin-top:10px;font-size:13px">⚙️ Segmentation v2 — Morphology & Cleanup</summary>
-      <div class="row" style="margin-top:8px">
-        <div><label>Closing radius</label><input id="segMorphClose" type="number" step="1" min="0" max="10" value="0"></div>
-        <div><label>Opening radius</label><input id="segMorphOpen" type="number" step="1" min="0" max="10" value="0"></div>
-      </div>
-      <div class="row">
-        <div><label>Dilation radius</label><input id="segDilate" type="number" step="1" min="0" max="10" value="0"></div>
-        <div><label>Erosion radius</label><input id="segErode" type="number" step="1" min="0" max="10" value="0"></div>
-      </div>
-      <div class="row">
-        <div><label>Min island vol mm³</label><input id="segMinIsland" type="number" step="50" min="0" value="0"></div>
-        <div><label>Decimation faces (0=off)</label><input id="segDecimate" type="number" step="1000" min="0" value="0"></div>
-      </div>
-      <div class="row">
-        <div><label>Fill holes</label><select id="segFillHoles"><option value="true">Yes</option><option value="false" selected>No</option></select></div>
-        <div><label>ROI crop</label><select id="segRoiCrop"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
-      </div>
-      <div class="row">
-        <div><label>PCA align</label><select id="segPca"><option value="false" selected>No</option><option value="true">Yes</option></select></div>
-        <div><label>Repair mesh</label><select id="segRepair"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
-      </div>
-    </details>
-    <button id="regenBtn" onclick="regenerateMesh()" disabled>Regenerate bone mesh</button>
-    <div id="segStatus" class="status"><span class="pill warn">idle</span> Segmentation not configured.</div>
 
-    <h2>3. Osteotomy</h2>
-    <div class="row">
-      <div><label>Cut plane axis</label><select id="axis"><option value="z">Z</option><option value="y" selected>Y</option><option value="x">X</option></select></div>
-      <div><label>Offset mm</label><input id="offset" type="number" step="1" value="0"></div>
-    </div>
-    <div class="row">
-      <div><label>Fragment to move</label><select id="side"><option value="positive">positive</option><option value="negative">negative</option></select></div>
-      <div><label>Rotation axis</label><select id="rotAxis"><option value="z">Z</option><option value="y">Y</option><option value="x" selected>X</option></select></div>
-    </div>
-    <label>Rotation degrees</label><input id="rotDeg" type="range" min="-60" max="60" step="1" value="15" oninput="rotVal.textContent=this.value+'°'"><div class="hint">Value: <b id="rotVal">15°</b></div>
-    <div class="row3"><div><label>Tx</label><input id="tx" type="number" step="1" value="0"></div><div><label>Ty</label><input id="ty" type="number" step="1" value="0"></div><div><label>Tz</label><input id="tz" type="number" step="1" value="0"></div></div>
-    <button id="cutBtn" onclick="runCut()" disabled>Cut / apply transform</button>
-    <div id="cutStatus" class="status"><span class="pill warn">idle</span> No plan applied.</div>
-    <div id="downloads" class="downloads"></div>
-
-    <h2>4. Cutting Guide</h2>
-    <div class="row">
-      <div><label>Length mm</label><input id="gLength" type="number" step="1" value="70"></div>
-      <div><label>Height mm</label><input id="gHeight" type="number" step="1" value="22"></div>
-    </div>
-    <div class="row">
-      <div><label>Rail thickness mm</label><input id="gRail" type="number" step="0.5" value="6"></div>
-      <div><label>Saw slot width mm</label><input id="gSlot" type="number" step="0.1" value="1.2"></div>
-    </div>
-    <div class="row3">
-      <div><label>Pin radius</label><input id="gPinR" type="number" step="0.1" value="1.6"></div>
-      <div><label>Pin spacing</label><input id="gPinS" type="number" step="1" value="38"></div>
-      <div><label>Sleeve outer</label><input id="gSleeve" type="number" step="0.1" value="3.2"></div>
-    </div>
-    <button id="guideBtn" onclick="runGuide()" disabled>Generate cutting guide STL</button>
-    <div id="guideStatus" class="status"><span class="pill warn">idle</span> No guide.</div>
-    <div id="guideDownloads" class="downloads"></div>
-
-    <h2>5. Conformal Guide</h2>
-    <div class="row">
-      <div><label>Contact side</label><select id="cSide"><option value="positive">positive</option><option value="negative">negative</option></select></div>
-      <div><label>Clearance mm</label><input id="cClear" type="number" step="0.1" value="0.6"></div>
-    </div>
-    <div class="row">
-      <div><label>Pad length mm</label><input id="cLength" type="number" step="1" value="70"></div>
-      <div><label>Pad height mm</label><input id="cHeight" type="number" step="1" value="28"></div>
-    </div>
-    <div class="row3">
-      <div><label>Thickness</label><input id="cThick" type="number" step="0.5" value="4"></div>
-      <div><label>Res U</label><input id="cResU" type="number" step="1" value="30"></div>
-      <div><label>Res V</label><input id="cResV" type="number" step="1" value="16"></div>
-    </div>
-    <button id="conformalBtn" onclick="runConformal()" disabled>Generate conformal guide STL</button>
-    <div id="conformalStatus" class="status"><span class="pill warn">idle</span> No conformal pad.</div>
-    <div id="conformalDownloads" class="downloads"></div>
-
-    <h2>6. Screw Trajectories</h2>
-    <div class="row3">
-      <div><label>Entry X</label><input id="sEntryX" type="number" step="0.5" value="0"></div>
-      <div><label>Entry Y</label><input id="sEntryY" type="number" step="0.5" value="0"></div>
-      <div><label>Entry Z</label><input id="sEntryZ" type="number" step="0.5" value="0"></div>
-    </div>
-    <div class="row3">
-      <div><label>Dir X</label><input id="sDirX" type="number" step="0.1" value="0"></div>
-      <div><label>Dir Y</label><input id="sDirY" type="number" step="0.1" value="0"></div>
-      <div><label>Dir Z</label><input id="sDirZ" type="number" step="0.1" value="1"></div>
-    </div>
-    <div class="row">
-      <div><label>Length mm</label><input id="sLen" type="number" step="1" value="30"></div>
-      <div><label>Diameter mm</label><input id="sDiam" type="number" step="0.1" value="3.5"></div>
-    </div>
-    <button class="secondary" onclick="addScrewTraj()">Add screw trajectory</button>
-    <div id="screwList" style="margin-top:8px;max-height:120px;overflow:auto"></div>
-    <button onclick="generateSleeves()">Generate drill sleeves STL</button>
-    <div id="screwStatus" class="status"><span class="pill warn">idle</span> No screws.</div>
-
-    <h2>7. Plate Generator</h2>
-    <div class="row">
-      <div><label>Width mm</label><input id="pWidth" type="number" step="0.5" value="12"></div>
-      <div><label>Thickness mm</label><input id="pThick" type="number" step="0.5" value="3"></div>
-    </div>
-    <div class="row">
-      <div><label>Screw hole Ø mm</label><input id="pHole" type="number" step="0.1" value="3.5"></div>
-      <div><label>Hole spacing mm</label><input id="pSpacing" type="number" step="1" value="15"></div>
-    </div>
-    <div class="hint">Click 3+ points on the mesh to define centerline, then generate.</div>
-    <button class="secondary" onclick="clearCenterline()">Clear centerline points</button>
-    <button onclick="generatePlate()">Generate patient-specific plate</button>
-    <div id="plateStatus" class="status"><span class="pill warn">idle</span> No plate.</div>
-    <div id="plateDownloads" class="downloads"></div>
-
-    <h2>8. Measurements</h2>
-    <div class="row3">
-      <div><label>P1 X</label><input id="mP1X" type="number" step="0.5" value="0"></div>
-      <div><label>P1 Y</label><input id="mP1Y" type="number" step="0.5" value="0"></div>
-      <div><label>P1 Z</label><input id="mP1Z" type="number" step="0.5" value="0"></div>
-    </div>
-    <div class="row3">
-      <div><label>P2 X</label><input id="mP2X" type="number" step="0.5" value="0"></div>
-      <div><label>P2 Y</label><input id="mP2Y" type="number" step="0.5" value="0"></div>
-      <div><label>P2 Z</label><input id="mP2Z" type="number" step="0.5" value="0"></div>
-    </div>
-    <button class="secondary" onclick="measureDistance()">Measure distance</button>
-    <div id="measureResult" class="status" style="margin-top:8px"><span class="pill warn">idle</span> No measurement.</div>
-
-    <h2>Metadata</h2>
-    <pre id="info">—</pre>
-
-    <h2>🦴 Object Manager</h2>
-    <div id="bonePanel" class="bone-panel">
-      <div id="boneList" class="bone-list">
-        <div class="hint">Load a DICOM with "Split bones" to manage individual bones</div>
-      </div>
-      <div class="bone-actions" id="boneActions" style="display:none">
-        <button onclick="boneAction('select')" class="small-btn">✓ Select</button>
-        <button onclick="boneAction('hide')" class="small-btn">👁 Hide/Show</button>
-        <button onclick="boneAction('transparent')" class="small-btn">◐ Transparent</button>
-        <button onclick="boneAction('copy')" class="small-btn">⧉ Copy (Ctrl+D)</button>
-        <button onclick="boneAction('mirror')" class="small-btn">↔ Mirror</button>
-        <button onclick="boneAction('delete')" class="small-btn bad">✕ Delete</button>
-      </div>
-      <div id="transformPanel" style="display:none;margin-top:8px">
-        <div class="row3">
-          <div><label>X mm</label><input id="boneX" type="number" step="1" value="0"></div>
-          <div><label>Y mm</label><input id="boneY" type="number" step="1" value="0"></div>
-          <div><label>Z mm</label><input id="boneZ" type="number" step="1" value="0"></div>
-        </div>
-        <button onclick="applyBoneTransform()" class="secondary" style="margin-top:6px">Apply Position</button>
-        <div class="row3" style="margin-top:6px">
-          <div><label>Rot X°</label><input id="boneRx" type="number" step="5" value="0"></div>
-          <div><label>Rot Y°</label><input id="boneRy" type="number" step="5" value="0"></div>
-          <div><label>Rot Z°</label><input id="boneRz" type="number" step="5" value="0"></div>
-        </div>
-        <button onclick="applyBoneRotation()" class="secondary" style="margin-top:6px">Apply Rotation</button>
+    <div class="section">
+      <label>Objects</label>
+      <div class="section-row">
+        <button onclick="selectAll()">Select All</button>
+        <button onclick="deselectAll()">Deselect</button>
       </div>
     </div>
-  </aside>
 
-  <main class="panel viewer" id="viewer">
-    <div class="toolbar">Mouse: rotate · wheel: zoom · right click: pan</div>
-    <div class="undo-bar" id="undoBar">
-      <button class="undo-btn" id="undoBtn" onclick="doUndo()" title="Undo (Ctrl+Z)">↶</button>
-      <button class="undo-btn" id="redoBtn" onclick="doRedo()" title="Redo (Ctrl+Shift+Z)">↷</button>
-      <button class="undo-btn" id="historyBtn" onclick="toggleHistory()" title="Action history">☰</button>
-      <span class="undo-label" id="undoLabel"></span>
+    <div id="bone-list"></div>
+
+    <div id="status">
+      <span id="status-text">Ready</span>
+      <span id="bone-count"></span>
     </div>
-    <div class="history-panel" id="historyPanel"></div>
-  </main>
+  </div>
+
+  <!-- 3D Viewer -->
+  <div id="viewer">
+    <div id="gizmo-toolbar">
+      <button id="btn-translate" class="active" onclick="setGizmoMode('translate')" title="Move (G)">✥ Move</button>
+      <button id="btn-rotate" onclick="setGizmoMode('rotate')" title="Rotate (R)">↻ Rotate</button>
+      <button id="btn-scale" onclick="setGizmoMode('scale')" title="Scale (S)">⤡ Scale</button>
+      <button onclick="duplicateBone()" title="Duplicate (Ctrl+D)">⧉ Clone</button>
+      <button onclick="mirrorBone()" title="Mirror (M)">↔ Mirror</button>
+    </div>
+    <div id="hotkeys">
+      <kbd>G</kbd> Move &nbsp; <kbd>R</kbd> Rotate &nbsp; <kbd>S</kbd> Scale<br>
+      <kbd>Del</kbd> Delete &nbsp; <kbd>H</kbd> Hide &nbsp; <kbd>J</kbd> Transparent<br>
+      <kbd>Ctrl+D</kbd> Clone &nbsp; <kbd>M</kbd> Mirror<br>
+      <kbd>Esc</kbd> Deselect &nbsp; <kbd>F</kbd> Focus selected
+    </div>
+    <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
+  </div>
 </div>
 
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
   }
 }
 </script>
+
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
-let caseId=null, scene, camera, renderer, controls, meshes=[];
-let centerlinePoints = [];
-const $=id=>document.getElementById(id);
-window.rotVal = $('rotVal');
+// ===================== SCENE SETUP =====================
+const container = document.getElementById('viewer');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a12);
 
-function init(){
-  const el=$('viewer');
-  scene=new THREE.Scene(); scene.background=new THREE.Color(0x080b12);
-  camera=new THREE.PerspectiveCamera(45, el.clientWidth/el.clientHeight, 0.1, 10000); camera.position.set(130,140,160);
-  renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(el.clientWidth, el.clientHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.outputColorSpace=THREE.SRGBColorSpace; el.appendChild(renderer.domElement);
-  controls=new OrbitControls(camera, renderer.domElement); controls.enableDamping=true;
-  scene.add(new THREE.AmbientLight(0xffffff,0.4));
-  scene.add(new THREE.HemisphereLight(0xd0e8ff,0x304050,0.8));
-  const dl1=new THREE.DirectionalLight(0xffffff,1.0); dl1.position.set(120,160,100); scene.add(dl1);
-  const dl2=new THREE.DirectionalLight(0xaabbdd,0.5); dl2.position.set(-100,-60,-80); scene.add(dl2);
-  const grid=new THREE.GridHelper(220,22,0x334155,0x172033); scene.add(grid);
-  addPlaneHelper('y',0);
-  window.addEventListener('resize',()=>{camera.aspect=el.clientWidth/el.clientHeight;camera.updateProjectionMatrix();renderer.setSize(el.clientWidth,el.clientHeight)});
-  animate();
-}
-function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}
-function clearMeshes(){meshes.forEach(m=>scene.remove(m));meshes=[]}
-function addPlaneHelper(axis,offset){
-  [...scene.children].filter(o=>o.name==='cutPlane').forEach(o=>scene.remove(o));
-  const geo=new THREE.PlaneGeometry(180,180); const mat=new THREE.MeshBasicMaterial({color:0x38bdf8,transparent:true,opacity:.18,side:THREE.DoubleSide}); const p=new THREE.Mesh(geo,mat); p.name='cutPlane';
-  if(axis==='y'){p.rotation.x=Math.PI/2;p.position.y=offset}else if(axis==='x'){p.rotation.y=Math.PI/2;p.position.x=offset}else{p.position.z=offset}
-  scene.add(p);
-}
-function loadStl(url, color=0xd8e7ff, opacity=1){
-  return new Promise((resolve,reject)=>{
-    new STLLoader().load(url, geo=>{
-      geo.computeVertexNormals();
-      const mat=new THREE.MeshStandardMaterial({color,roughness:.62,metalness:.05,transparent:opacity<1,opacity,side:THREE.DoubleSide});
-      const mesh=new THREE.Mesh(geo,mat); scene.add(mesh); meshes.push(mesh);
-      fitCamera(); resolve(mesh);
-    }, undefined, err=>{ console.error('STL load failed', err); reject(err); });
-  });
-}
-function fitCamera(){
-  if(!meshes.length)return; const box=new THREE.Box3(); meshes.forEach(m=>box.expandByObject(m)); const size=box.getSize(new THREE.Vector3()).length(); const center=box.getCenter(new THREE.Vector3()); controls.target.copy(center); camera.position.copy(center.clone().add(new THREE.Vector3(size*.7,size*.7,size*.9))); camera.near=size/100; camera.far=size*20; camera.updateProjectionMatrix();
-}
-function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-function setStatus(id, ok, msg){$(id).innerHTML=`<span class="pill ${ok?'ok':'bad'}">${ok?'OK':'FAIL'}</span> ${esc(msg)}`}
-function enableCadButtons(){ $('cutBtn').disabled=false; $('guideBtn').disabled=false; $('conformalBtn').disabled=false; $('regenBtn').disabled=false; }
-function populateSeries(meta){
-  const sel=$('seriesSelect'); sel.innerHTML='<option value="">auto / largest series</option>';
-  (meta?.available_series||[]).sort((a,b)=>(b.slices||0)-(a.slices||0)).forEach(s=>{
-    const o=document.createElement('option'); o.value=s.uid; o.textContent=`${s.slices} slices — ${s.description||s.uid.slice(0,18)}`; if(s.uid===meta.series_uid)o.selected=true; sel.appendChild(o);
-  });
-  if(meta?.threshold_hu!==undefined) $('segHuMin').value=meta.threshold_hu;
-  if(meta?.threshold_max_hu!==undefined && meta.threshold_max_hu!==null) $('segHuMax').value=meta.threshold_max_hu;
-  if(meta?.step_size!==undefined) $('segStep').value=meta.step_size;
-  if(meta?.smoothing_iterations!==undefined) $('segSmooth').value=meta.smoothing_iterations;
-  if(meta?.morphology_closing_radius!==undefined) $('segMorphClose').value=meta.morphology_closing_radius;
-  if(meta?.morphology_opening_radius!==undefined) $('segMorphOpen').value=meta.morphology_opening_radius;
-  if(meta?.fill_holes!==undefined) $('segFillHoles').value=meta.fill_holes?'true':'false';
-  if(meta?.min_island_volume_mm3!==undefined) $('segMinIsland').value=meta.min_island_volume_mm3;
-  if(meta?.roi_crop!==undefined) $('segRoiCrop').value=meta.roi_crop?'true':'false';
-  if(meta?.pca_align!==undefined) $('segPca').value=meta.pca_align?'true':'false';
-  if(meta?.active_preset) $('segPreset').value=meta.active_preset;
-  const mv=meta?.mesh_validation;
-  const wt=mv?.is_watertight;
-  const presetTag=meta?.active_preset?` · preset=${meta.active_preset}`:'';
-  const wtTag=wt!==undefined?` · WT=${wt}`:'';
-  $('segStatus').innerHTML=`<span class="pill ok">series</span> ${meta?.slices||'?'} slices · HU ${Math.round(meta?.hu_min||0)}..${Math.round(meta?.hu_max||0)}${presetTag}${wtTag}`;
-}
+const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
+camera.position.set(0, 50, 200);
 
-// -- Upload functions --
-window.uploadMesh=async()=>{
-  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Choose STL/OBJ/PLY.'); return}
-  const fd=new FormData(); fd.append('file',f);
-  const r=await fetch('/api/upload',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('uploadStatus',false,j.detail||'upload failed');return}
-  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Mesh loaded: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
-  updateUndoUI();
-};
-window.uploadDicom=async()=>{
-  const f=$('file').files[0]; if(!f){setStatus('uploadStatus',false,'Choose DICOM ZIP or .dcm.'); return}
-  const fd=new FormData();
-  fd.append('file',f);
-  fd.append('threshold_hu',$('dicomThreshold').value||'250');
-  fd.append('step_size',$('dicomStep').value||'1');
-  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
-  fd.append('keep_largest',$('segLargest').value);
-  fd.append('smoothing_iterations',$('segSmooth').value||'2');
-  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
-  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
-  fd.append('dilation_radius',$('segDilate').value||'0');
-  fd.append('erosion_radius',$('segErode').value||'0');
-  fd.append('fill_holes',$('segFillHoles').value);
-  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
-  fd.append('roi_crop',$('segRoiCrop').value);
-  fd.append('pca_align',$('segPca').value);
-  fd.append('decimation_target_faces',$('segDecimate').value||'0');
-  fd.append('repair_mesh',$('segRepair').value);
-  fd.append('preset',$('segPreset').value||'');
-  fd.append('sensitivity',$('segSensitivity').value||'medium');
-  fd.append('split_bones',$('splitBones').checked?'true':'false');
-  const r=await fetch('/api/upload-dicom',{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM conversion failed');return}
-  caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,'DICOM converted: '+caseId);
-  populateSeries(j.dicom);
-  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
-  if(j.bones && j.bones.length){ await loadMultiBoneScene(j); } else { clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1); }
-  updateUndoUI();
-};
-window.uploadDicomFolder=async()=>{
-  const files=[...$('folderInput').files];
-  if(!files.length){setStatus('uploadStatus',false,'Choose DICOM folder first.'); return}
-  const fd=new FormData();
-  for(const f of files){ fd.append('files', f, f.webkitRelativePath || f.name); }
-  fd.append('threshold_hu',$('dicomThreshold').value||'250');
-  fd.append('step_size',$('dicomStep').value||'1');
-  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
-  fd.append('keep_largest',$('segLargest').value);
-  fd.append('smoothing_iterations',$('segSmooth').value||'2');
-  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
-  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
-  fd.append('dilation_radius',$('segDilate').value||'0');
-  fd.append('erosion_radius',$('segErode').value||'0');
-  fd.append('fill_holes',$('segFillHoles').value);
-  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
-  fd.append('roi_crop',$('segRoiCrop').value);
-  fd.append('pca_align',$('segPca').value);
-  fd.append('decimation_target_faces',$('segDecimate').value||'0');
-  fd.append('repair_mesh',$('segRepair').value);
-  fd.append('preset',$('segPreset').value||'');
-  fd.append('sensitivity',$('segSensitivity').value||'medium');
-  fd.append('split_bones',$('splitBones').checked?'true':'false');
-  const r=await fetch('/api/upload-dicom-folder',{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('uploadStatus',false,j.detail||'DICOM folder conversion failed');return}
-  caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,`DICOM folder converted: ${caseId} (${j.dicom.uploaded_files||files.length} files)`);
-  populateSeries(j.dicom);
-  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
-  if(j.bones && j.bones.length){ await loadMultiBoneScene(j); } else { clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1); }
-  updateUndoUI();
-};
-window.loadLatestCase=async()=>{
-  const r=await fetch('/api/recent-cases?limit=10'); const rows=await r.json();
-  const j=rows.find(x=>x.is_dicom)||rows[0];
-  if(!j){setStatus('uploadStatus',false,'No processed case.'); return}
-  caseId=j.case_id; enableCadButtons();
-  setStatus('uploadStatus',true,`Loaded case ${caseId} (${Math.round(j.size_bytes/1024)} KB STL)`);
-  if(j.dicom) populateSeries(j.dicom);
-  clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xf8fafc,1);
-  updateUndoUI();
-};
-window.loadSample=async()=>{
-  const r=await fetch('/api/sample',{method:'POST'}); const j=await r.json();
-  caseId=j.case_id; enableCadButtons(); setStatus('uploadStatus',true,'Demo bone: '+caseId); $('info').textContent=JSON.stringify(j.info,null,2); clearMeshes(); await loadStl(j.mesh_url,0xd8e7ff,1);
-  updateUndoUI();
-};
-window.applyPresetUI=()=>{
-  const p=$('segPreset').value;
-  const presets={
-    whole_limb:{threshold_hu:150,threshold_max_hu:2500,closing:3,opening:1,fill_holes:true,min_island:50,sensitivity:"high"},
-    long_bone:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:500,sensitivity:"medium"},
-    skull:{threshold_hu:180,threshold_max_hu:3000,closing:4,opening:2,fill_holes:true,min_island:200,sensitivity:"medium"},
-    spine:{threshold_hu:200,threshold_max_hu:3000,closing:2,opening:1,fill_holes:false,min_island:200,sensitivity:"medium"},
-    pelvis:{threshold_hu:200,threshold_max_hu:3000,closing:3,opening:1,fill_holes:true,min_island:500,sensitivity:"medium"},
-    rib:{threshold_hu:180,threshold_max_hu:3000,closing:2,opening:2,fill_holes:false,min_island:100,sensitivity:"high"},
-    cortical:{threshold_hu:400,threshold_max_hu:3000,closing:1,opening:0,fill_holes:true,min_island:200,sensitivity:"low"},
-    metal:{threshold_hu:200,threshold_max_hu:8000,closing:3,opening:2,fill_holes:true,min_island:300,sensitivity:"medium"},
-  };
-  if(!p||!presets[p])return;
-  const c=presets[p];
-  $('segHuMin').value=c.threshold_hu;
-  $('segHuMax').value=c.threshold_max_hu;
-  $('segMorphClose').value=c.closing;
-  $('segMorphOpen').value=c.opening;
-  $('segFillHoles').value=c.fill_holes?'true':'false';
-  $('segMinIsland').value=c.min_island;
-};
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
 
-window.regenerateMesh=async()=>{
-  if(!caseId){setStatus('segStatus',false,'Load a CT first.'); return}
-  $('segStatus').innerHTML='<span class="pill warn">working</span> Regenerating mesh...';
-  const fd=new FormData();
-  fd.append('threshold_hu',$('segHuMin').value||'250');
-  fd.append('threshold_max_hu',$('segHuMax').value||'3000');
-  fd.append('step_size',$('segStep').value||'1');
-  fd.append('series_uid',$('seriesSelect').value||'');
-  fd.append('keep_largest',$('segLargest').value);
-  fd.append('smoothing_iterations',$('segSmooth').value||'2');
-  fd.append('morphology_closing_radius',$('segMorphClose').value||'0');
-  fd.append('morphology_opening_radius',$('segMorphOpen').value||'0');
-  fd.append('dilation_radius',$('segDilate').value||'0');
-  fd.append('erosion_radius',$('segErode').value||'0');
-  fd.append('fill_holes',$('segFillHoles').value);
-  fd.append('min_island_volume_mm3',$('segMinIsland').value||'0');
-  fd.append('roi_crop',$('segRoiCrop').value);
-  fd.append('pca_align',$('segPca').value);
-  fd.append('decimation_target_faces',$('segDecimate').value||'0');
-  fd.append('repair_mesh',$('segRepair').value);
-  fd.append('preset',$('segPreset').value||'');
-  const r=await fetch(`/api/cases/${caseId}/regenerate-mesh`,{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('segStatus',false,j.detail||'regenerate failed');return}
-  populateSeries(j.dicom);
-  const mv=j.dicom?.mesh_validation;
-  setStatus('segStatus',true,`Mesh: ${j.info.vertices}v/${j.info.faces}f${mv?', WT='+mv.is_watertight:''}${j.dicom?.active_preset?', preset='+j.dicom.active_preset:''}`);
-  $('info').textContent=JSON.stringify({mesh:j.info,dicom:j.dicom},null,2);
-  clearMeshes(); await loadStl(j.mesh_url+'?t='+Date.now(),0xd8e7ff,1);
-  updateUndoUI();
-};
-window.runCut=async()=>{
-  if(!caseId){setStatus('cutStatus',false,'Load mesh first.'); return}
-  $('cutStatus').innerHTML='<span class="pill warn">working</span> Cutting...'; $('downloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
-  const fd=new FormData();
-  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['rotate_side',$('side').value],['rotate_axis',$('rotAxis').value],['rotate_deg',$('rotDeg').value],['translate_x',$('tx').value],['translate_y',$('ty').value],['translate_z',$('tz').value]].forEach(([k,v])=>fd.append(k,v));
-  const r=await fetch('/api/cut',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('cutStatus',false,j.detail||'cut failed');return}
-  setStatus('cutStatus',true,'Plan applied. Fragments exported.'); $('info').textContent=JSON.stringify(j,null,2);
-  clearMeshes(); await loadStl(j.outputs.positive+'?t='+Date.now(),0x60a5fa,.92); await loadStl(j.outputs.negative+'?t='+Date.now(),0xf97316,.92);
-  $('downloads').innerHTML=`<a href="${j.outputs.positive}" download>Download positive STL</a><a href="${j.outputs.negative}" download>Download negative STL</a><a href="${j.outputs.combined}" download>Download combined STL</a><a href="${j.outputs.plan}" download>Download plan JSON</a>`;
-  updateUndoUI();
-};
-window.runGuide=async()=>{
-  if(!caseId){setStatus('guideStatus',false,'Load mesh first.'); return}
-  $('guideStatus').innerHTML='<span class="pill warn">working</span> Generating guide...'; $('guideDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
-  const fd=new FormData();
-  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['length_mm',$('gLength').value],['height_mm',$('gHeight').value],['rail_thickness_mm',$('gRail').value],['slot_width_mm',$('gSlot').value],['pin_radius_mm',$('gPinR').value],['pin_spacing_mm',$('gPinS').value],['pin_sleeve_outer_mm',$('gSleeve').value]].forEach(([k,v])=>fd.append(k,v));
-  const r=await fetch('/api/guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('guideStatus',false,j.detail||'guide failed');return}
-  setStatus('guideStatus',true,'Cutting guide generated.'); $('info').textContent=JSON.stringify(j,null,2);
-  await loadStl(j.outputs.guide+'?t='+Date.now(),0x22c55e,.72);
-  $('guideDownloads').innerHTML=`<a href="${j.outputs.guide}" download>Download cutting guide STL</a><a href="${j.outputs.guide_json}" download>Download guide JSON</a>`;
-  updateUndoUI();
-};
-window.runConformal=async()=>{
-  if(!caseId){setStatus('conformalStatus',false,'Load mesh first.'); return}
-  $('conformalStatus').innerHTML='<span class="pill warn">working</span> Generating conformal guide...'; $('conformalDownloads').innerHTML=''; addPlaneHelper($('axis').value, Number($('offset').value||0));
-  const fd=new FormData();
-  [['case_id',caseId],['axis',$('axis').value],['offset_mm',$('offset').value],['contact_side',$('cSide').value],['length_mm',$('cLength').value],['height_mm',$('cHeight').value],['thickness_mm',$('cThick').value],['clearance_mm',$('cClear').value],['resolution_u',$('cResU').value],['resolution_v',$('cResV').value],['include_slot_rails','true']].forEach(([k,v])=>fd.append(k,v));
-  const r=await fetch('/api/conformal-guide',{method:'POST',body:fd}); const j=await r.json(); if(!r.ok){setStatus('conformalStatus',false,j.detail||'conformal failed');return}
-  setStatus('conformalStatus',true,'Conformal guide generated.'); $('info').textContent=JSON.stringify(j,null,2);
-  await loadStl(j.outputs.combined+'?t='+Date.now(),0xa855f7,.70);
-  $('conformalDownloads').innerHTML=`<a href="${j.outputs.combined}" download>Download conformal guide STL</a><a href="${j.outputs.pad}" download>Download contact pad STL</a><a href="${j.outputs.json}" download>Download JSON</a>`;
-  updateUndoUI();
-};
+// Lights — warm surgical lighting
+const ambientLight = new THREE.AmbientLight(0x404050, 0.6);
+scene.add(ambientLight);
+const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x443322, 0.5);
+scene.add(hemiLight);
+const dirLight1 = new THREE.DirectionalLight(0xffeedd, 1.2);
+dirLight1.position.set(100, 200, 150);
+dirLight1.castShadow = true;
+scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0xddddff, 0.6);
+dirLight2.position.set(-100, -50, -100);
+scene.add(dirLight2);
 
-// -- Screw Trajectories --
-window.addScrewTraj=async()=>{
-  if(!caseId){setStatus('screwStatus',false,'Load mesh first.'); return}
-  const fd=new FormData();
-  fd.append('entry_x',$('sEntryX').value); fd.append('entry_y',$('sEntryY').value); fd.append('entry_z',$('sEntryZ').value);
-  fd.append('dir_x',$('sDirX').value); fd.append('dir_y',$('sDirY').value); fd.append('dir_z',$('sDirZ').value);
-  fd.append('length_mm',$('sLen').value); fd.append('diameter_mm',$('sDiam').value);
-  const r=await fetch(`/api/cases/${caseId}/screw-trajectories`,{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('screwStatus',false,j.detail||'failed');return}
-  setStatus('screwStatus',true,`Added: ${j.trajectory.name}`);
-  refreshScrewList();
-  updateUndoUI();
-};
-async function refreshScrewList(){
-  if(!caseId) return;
-  const r=await fetch(`/api/cases/${caseId}/screw-trajectories`); const j=await r.json();
-  const list=$('screwList');
-  if(!j.trajectories?.length){ list.innerHTML='<div class="hint">No screws added</div>'; return; }
-  list.innerHTML=j.trajectories.map(t=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1a2538;font-size:12px"><span style="color:#c9e7ff">${t.name}</span><span style="color:#6b7fa3">${t.length_mm}mm Ø${t.diameter_mm}</span></div>`).join('');
-}
-window.generateSleeves=async()=>{
-  if(!caseId){setStatus('screwStatus',false,'Load mesh first.'); return}
-  const r=await fetch(`/api/cases/${caseId}/screw-trajectories/generate-sleeves`,{method:'POST'}); const j=await r.json();
-  if(!r.ok){setStatus('screwStatus',false,j.detail||'failed');return}
-  setStatus('screwStatus',true,`Generated ${j.count} sleeves`);
-  await loadStl(j.outputs?.screw_sleeves||`/api/cases/${caseId}/outputs/screw_sleeves.stl?t=${Date.now()}`,0xf59e0b,.7);
-  updateUndoUI();
-};
+// Grid
+const grid = new THREE.GridHelper(400, 40, 0x222233, 0x16161e);
+scene.add(grid);
 
-// -- Plate Generator --
-window.clearCenterline=()=>{ centerlinePoints=[]; $('plateStatus').innerHTML='<span class="pill warn">idle</span> Points cleared.'; };
-window.generatePlate=async()=>{
-  if(!caseId){setStatus('plateStatus',false,'Load mesh first.'); return}
-  if(centerlinePoints.length<2){setStatus('plateStatus',false,'Need 2+ centerline points. Click on mesh.'); return}
-  const fd=new FormData();
-  fd.append('centerline_points',JSON.stringify(centerlinePoints));
-  fd.append('width_mm',$('pWidth').value);
-  fd.append('thickness_mm',$('pThick').value);
-  fd.append('screw_hole_diameter_mm',$('pHole').value);
-  fd.append('screw_hole_spacing_mm',$('pSpacing').value);
-  const r=await fetch('/api/plate-generator',{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('plateStatus',false,j.detail||'failed');return}
-  setStatus('plateStatus',true,`Plate: ${j.screw_holes} screw holes`);
-  $('plateDownloads').innerHTML=`<a href="${j.url}" download>Download plate STL</a>`;
-  await loadStl(j.url+'?t='+Date.now(),0x38bdf8,.8);
-  updateUndoUI();
-};
+// ===================== CONTROLS =====================
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.rotateSpeed = 0.8;
 
-// -- Measurements --
-window.measureDistance=async()=>{
-  if(!caseId){setStatus('measureResult',false,'Load mesh first.'); return}
-  const fd=new FormData();
-  fd.append('point_a',JSON.stringify([parseFloat($('mP1X').value),parseFloat($('mP1Y').value),parseFloat($('mP1Z').value)]));
-  fd.append('point_b',JSON.stringify([parseFloat($('mP2X').value),parseFloat($('mP2Y').value),parseFloat($('mP2Z').value)]));
-  const r=await fetch('/api/measure-distance',{method:'POST',body:fd}); const j=await r.json();
-  if(!r.ok){setStatus('measureResult',false,j.detail||'failed');return}
-  $('measureResult').innerHTML=`<span class="pill ok">result</span> Distance: <b>${j.distance_mm.toFixed(2)} mm</b>`;
-};
+// TransformControls gizmo
+const transformControls = new TransformControls(camera, renderer.domElement);
+transformControls.setMode('translate');
+transformControls.setSize(0.8);
+scene.add(transformControls.getHelper());
 
-// -- Undo/Redo --
-async function fetchHistory(){
-  if(!caseId) return null;
-  try{ const r=await fetch(`/api/cases/${caseId}/history`); if(!r.ok) return null; return await r.json(); }catch{ return null; }
-}
-async function updateUndoUI(){
-  const h=await fetchHistory();
-  const uBtn=$('undoBtn'), rBtn=$('redoBtn'), lbl=$('undoLabel');
-  if(!h){ uBtn.disabled=true; rBtn.disabled=true; lbl.textContent=''; return; }
-  uBtn.disabled=!h.can_undo; rBtn.disabled=!h.can_redo;
-  const uName=h.undo_stack?.length ? h.undo_stack[h.undo_stack.length-1].name : '';
-  const rName=h.redo_stack?.length ? h.redo_stack[h.redo_stack.length-1].name : '';
-  let tip=''; if(uName) tip+=`Undo: ${uName}`; if(rName) tip+=tip?` | Redo: ${rName}`:`Redo: ${rName}`;
-  lbl.textContent=tip;
-}
-async function doUndo(){
-  if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
-  const r=await fetch(`/api/cases/${caseId}/undo`,{method:'POST'});
-  if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Undo failed'); return; }
-  await updateUndoUI(); clearMeshes();
-  await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
-}
-async function doRedo(){
-  if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
-  const r=await fetch(`/api/cases/${caseId}/redo`,{method:'POST'});
-  if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Redo failed'); return; }
-  await updateUndoUI(); clearMeshes();
-  await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
-}
-async function toggleHistory(){
-  const panel=$('historyPanel');
-  if(panel.classList.contains('open')){ panel.classList.remove('open'); return; }
-  const h=await fetchHistory();
-  if(!h){ panel.innerHTML='<div class="hist-empty">No history</div>'; panel.classList.add('open'); return; }
-  let html='';
-  const fmtTs=t=>{ if(!t) return ''; const d=new Date(t*1000); return d.toLocaleTimeString(); };
-  if(h.undo_stack?.length){
-    html+='<div style="color:var(--accent);font-size:11px;font-weight:700;margin-bottom:4px">Undo stack</div>';
-    for(const a of [...h.undo_stack].reverse()) html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
-  }
-  if(h.redo_stack?.length){
-    html+='<div style="color:var(--warn);font-size:11px;font-weight:700;margin:6px 0 4px">Redo stack</div>';
-    for(const a of [...h.redo_stack].reverse()) html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
-  }
-  if(!html) html='<div class="hist-empty">No actions yet</div>';
-  panel.innerHTML=html; panel.classList.add('open');
-}
-
-// -- Multi-Bone Support --
-const BONE_COLORS = [
-  0xd8e7ff, 0xffd4b8, 0xb8ffd4, 0xd4b8ff, 0xffb8d4,
-  0xb8d4ff, 0xffe0b8, 0xb8ffe0, 0xe0b8ff, 0xffb8e0,
-  0xc8e8ff, 0xffc8e8, 0xe8ffc8, 0xc8ffe8, 0xe8c8ff,
-  0xfff0c8, 0xc8fff0, 0xf0c8ff, 0xc8f0ff, 0xf0ffc8
-];
-let boneObjects = [];
-let selectedBoneIndex = -1;
-
-async function loadStlGeometry(url) {
-  const res = await fetch(url);
-  const buf = await res.arrayBuffer();
-  const loader = new STLLoader();
-  return loader.parse(buf);
-}
-
-async function loadMultiBoneScene(response) {
-  clearMeshes();
-  boneObjects = [];
-  const bones = response.bones || [];
-  for (let i = 0; i < bones.length; i++) {
-    const bone = bones[i];
-    const color = BONE_COLORS[i % BONE_COLORS.length];
-    try {
-      const geo = await loadStlGeometry(bone.mesh_url);
-      geo.computeVertexNormals();
-      const mat = new THREE.MeshPhongMaterial({
-        color: color,
-        shininess: 40,
-        specular: 0x222222,
-        transparent: false,
-        side: THREE.DoubleSide
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = bone.name;
-      mesh.userData = {
-        boneIndex: i,
-        boneName: bone.name,
-        volume: bone.volume_mm3,
-        selected: false,
-        visible: true,
-        opacity: 1.0
-      };
-      scene.add(mesh);
-      boneObjects.push(mesh);
-    } catch(e) {
-      console.warn('Failed to load bone ' + bone.name, e);
-    }
-  }
-  fitCamera();
-  updateBonePanel();
-  caseId = response.case_id;
-  enableCadButtons();
-}
-
-function updateBonePanel() {
-  const list = $('boneList');
-  if (!boneObjects.length) {
-    list.innerHTML = '<div class="hint">Load a DICOM with "Split bones" to manage individual bones</div>';
-    $('boneActions').style.display = 'none';
-    return;
-  }
-  $('boneActions').style.display = 'block';
-  list.innerHTML = boneObjects.map((b, i) => {
-    const sel = i === selectedBoneIndex ? 'selected' : '';
-    const vis = b.userData.visible ? '👁' : '🚫';
-    const trans = b.material.transparent ? '◐' : '■';
-    return `<div class="bone-item ${sel}" onclick="selectBone(${i})">
-      <span class="bone-color" style="background:#${b.material.color.getHexString()}"></span>
-      <span class="bone-name">${b.userData.boneName}</span>
-      <span class="bone-info">${Math.round(b.userData.volume||0)} mm³</span>
-      <span class="bone-vis" onclick="event.stopPropagation();toggleBoneVis(${i})">${vis}</span>
-      <span class="bone-trans" onclick="event.stopPropagation();toggleBoneTrans(${i})">${trans}</span>
-    </div>`;
-  }).join('');
-}
-
-window.selectBone = function(index) {
-  if (selectedBoneIndex >= 0 && selectedBoneIndex < boneObjects.length) {
-    boneObjects[selectedBoneIndex].userData.selected = false;
-  }
-  selectedBoneIndex = index;
-  if (index >= 0 && index < boneObjects.length) {
-    boneObjects[index].userData.selected = true;
-    $('transformPanel').style.display = 'block';
-    const pos = boneObjects[index].position;
-    $('boneX').value = Math.round(pos.x * 10) / 10;
-    $('boneY').value = Math.round(pos.y * 10) / 10;
-    $('boneZ').value = Math.round(pos.z * 10) / 10;
-  } else {
-    $('transformPanel').style.display = 'none';
-  }
-  updateBonePanel();
-};
-
-window.toggleBoneVis = function(i) {
-  const b = boneObjects[i];
-  b.visible = !b.visible;
-  b.userData.visible = b.visible;
-  updateBonePanel();
-};
-
-window.toggleBoneTrans = function(i) {
-  const b = boneObjects[i];
-  if (b.material.transparent) {
-    b.material.transparent = false;
-    b.material.opacity = 1.0;
-  } else {
-    b.material.transparent = true;
-    b.material.opacity = 0.4;
-  }
-  b.material.needsUpdate = true;
-  updateBonePanel();
-};
-
-window.boneAction = function(action) {
-  if (selectedBoneIndex < 0) return;
-  switch(action) {
-    case 'select': break;
-    case 'hide': toggleBoneVis(selectedBoneIndex); break;
-    case 'transparent': toggleBoneTrans(selectedBoneIndex); break;
-    case 'copy': duplicateBone(selectedBoneIndex); break;
-    case 'mirror': mirrorBone(selectedBoneIndex); break;
-    case 'delete': deleteBone(selectedBoneIndex); break;
-  }
-};
-
-function duplicateBone(i) {
-  const src = boneObjects[i];
-  const clone = src.clone();
-  clone.material = src.material.clone();
-  clone.position.x += 20;
-  clone.name = src.name + '_copy';
-  clone.userData = {...src.userData, boneName: clone.name};
-  scene.add(clone);
-  boneObjects.push(clone);
-  selectedBoneIndex = boneObjects.length - 1;
-  updateBonePanel();
-}
-
-function mirrorBone(i) {
-  const src = boneObjects[i];
-  const clone = src.clone();
-  clone.material = src.material.clone();
-  clone.scale.x *= -1;
-  clone.name = src.name + '_mirror';
-  clone.userData = {...src.userData, boneName: clone.name};
-  scene.add(clone);
-  boneObjects.push(clone);
-  updateBonePanel();
-}
-
-function deleteBone(i) {
-  const bone = boneObjects[i];
-  scene.remove(bone);
-  bone.geometry.dispose();
-  bone.material.dispose();
-  boneObjects.splice(i, 1);
-  if (selectedBoneIndex >= boneObjects.length) selectedBoneIndex = boneObjects.length - 1;
-  updateBonePanel();
-}
-
-window.applyBoneTransform = function() {
-  if (selectedBoneIndex < 0) return;
-  const b = boneObjects[selectedBoneIndex];
-  b.position.set(
-    parseFloat($('boneX').value) || 0,
-    parseFloat($('boneY').value) || 0,
-    parseFloat($('boneZ').value) || 0
-  );
-};
-
-window.applyBoneRotation = function() {
-  if (selectedBoneIndex < 0) return;
-  const b = boneObjects[selectedBoneIndex];
-  b.rotation.set(
-    THREE.MathUtils.degToRad(parseFloat($('boneRx').value) || 0),
-    THREE.MathUtils.degToRad(parseFloat($('boneRy').value) || 0),
-    THREE.MathUtils.degToRad(parseFloat($('boneRz').value) || 0)
-  );
-};
-
-// -- Keyboard shortcuts --
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
-  if(e.ctrlKey && e.key==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); }
-  if(e.ctrlKey && e.key==='z' && e.shiftKey){ e.preventDefault(); doRedo(); }
-  if(e.key==='Delete'||e.key==='Backspace'){ if(selectedBoneIndex>=0){ deleteBone(selectedBoneIndex); e.preventDefault(); } }
-  if(e.key==='d'&&(e.ctrlKey||e.metaKey)){ if(selectedBoneIndex>=0){ duplicateBone(selectedBoneIndex); e.preventDefault(); } }
-  if(e.key==='h'||e.key==='H'){ if(selectedBoneIndex>=0){ toggleBoneVis(selectedBoneIndex); e.preventDefault(); } }
-  if(e.key==='j'||e.key==='J'){ if(selectedBoneIndex>=0){ toggleBoneTrans(selectedBoneIndex); e.preventDefault(); } }
+transformControls.addEventListener('dragging-changed', (event) => {
+  orbitControls.enabled = !event.value;
 });
 
-$('axis').addEventListener('change',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
-$('offset').addEventListener('input',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
-init();
+transformControls.addEventListener('objectChange', () => {
+  // Update the transform inputs when dragging
+  if (selectedBoneIndex >= 0 && selectedBoneIndex < boneObjects.length) {
+    const obj = boneObjects[selectedBoneIndex].mesh;
+    const orig = boneObjects[selectedBoneIndex].originalPosition;
+    document.getElementById('tx').value = Math.round(obj.position.x - orig.x);
+    document.getElementById('ty').value = Math.round(obj.position.y - orig.y);
+    document.getElementById('tz').value = Math.round(obj.position.z - orig.z);
+  }
+});
+
+// ===================== RAYCASTER (click to select) =====================
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+container.addEventListener('click', (event) => {
+  // Ignore if transform controls are being dragged
+  if (transformControls.dragging) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // Get all bone meshes
+  const meshes = boneObjects.map(b => b.mesh);
+  const intersects = raycaster.intersectObjects(meshes, false);
+
+  if (intersects.length > 0) {
+    const hitMesh = intersects[0].object;
+    const idx = boneObjects.findIndex(b => b.mesh === hitMesh);
+    if (idx >= 0) {
+      selectBone(idx);
+    }
+  } else {
+    deselectAll();
+  }
+});
+
+// ===================== BONE DATA =====================
+const BONE_COLORS = [
+  0xE8D5B7, 0xD4C4A8, 0xC9B896, 0xBFA87A, 0xB59868,
+  0xF5E6D0, 0xDBC8AA, 0xC4B08C, 0xAD9870, 0x9A8460,
+  0xE0CDB0, 0xCCC09A, 0xB8A880, 0xA49068, 0x907850,
+  0xF0DCC0, 0xD8C8A4, 0xC0B088, 0xA89870, 0x908058,
+];
+
+let boneObjects = []; // [{mesh, name, color, originalPosition, visible, transparent}]
+let selectedBoneIndex = -1;
+
+// ===================== UPLOAD =====================
+window.uploadDicom = async function() {
+  const input = document.getElementById('dicom-input');
+  if (!input.files.length) { alert('Select a DICOM folder'); return; }
+
+  const loading = document.getElementById('loading');
+  const progress = document.getElementById('load-progress');
+  loading.classList.remove('hidden');
+  progress.textContent = 'Uploading DICOM files...';
+
+  const formData = new FormData();
+  const splitBones = document.getElementById('split-bones').checked;
+
+  for (const file of input.files) {
+    formData.append('files', file, file.webkitRelativePath || file.name);
+  }
+  formData.append('split_bones', splitBones ? 'true' : 'false');
+
+  try {
+    progress.textContent = 'Segmenting bones (this may take 30-60s)...';
+    const resp = await fetch('/api/upload-dicom', { method: 'POST', body: formData });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Upload failed');
+    }
+
+    const data = await resp.json();
+    progress.textContent = `Loading ${data.meshes.length} bone(s)...`;
+
+    // Clear old bones
+    clearBones();
+
+    // Load each bone mesh
+    for (let i = 0; i < data.meshes.length; i++) {
+      const meshData = data.meshes[i];
+      progress.textContent = `Loading bone ${i + 1}/${data.meshes.length}...`;
+      await loadBoneMesh(meshData, i);
+    }
+
+    // Fit camera to all bones
+    fitCameraToBones();
+
+    document.getElementById('status-text').textContent =
+      `Loaded ${data.meshes.length} bone(s) | Seg: ${data.segmentation?.method || 'default'}`;
+    document.getElementById('bone-count').textContent =
+      `${data.meshes.length} objects`;
+
+    // Auto-select first bone
+    if (boneObjects.length > 0) selectBone(0);
+
+  } catch (e) {
+    alert('Error: ' + e.message);
+    document.getElementById('status-text').textContent = 'Error: ' + e.message;
+  } finally {
+    loading.classList.add('hidden');
+  }
+};
+
+// ===================== LOAD BONE MESH =====================
+async function loadBoneMesh(meshData, index) {
+  const geo = new THREE.BufferGeometry();
+
+  // Vertices
+  const verts = new Float32Array(meshData.vertices.flat());
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+
+  // Faces
+  const indices = new Uint32Array(meshData.faces.flat());
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  geo.computeVertexNormals();
+
+  // Material — bone-like PBR
+  const color = BONE_COLORS[index % BONE_COLORS.length];
+  const mat = new THREE.MeshStandardMaterial({
+    color: color,
+    roughness: 0.55,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+    flatShading: false,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = meshData.name || `bone_${index}`;
+
+  scene.add(mesh);
+
+  boneObjects.push({
+    mesh: mesh,
+    name: meshData.name || `Bone ${index + 1}`,
+    color: color,
+    originalPosition: mesh.position.clone(),
+    visible: true,
+    transparent: false,
+  });
+
+  updateBoneList();
+}
+
+// ===================== SELECTION =====================
+window.selectBone = function(index) {
+  // Deselect previous
+  if (selectedBoneIndex >= 0 && selectedBoneIndex < boneObjects.length) {
+    const prev = boneObjects[selectedBoneIndex];
+    prev.mesh.material.emissive.setHex(0x000000);
+    prev.mesh.material.emissiveIntensity = 0;
+  }
+
+  selectedBoneIndex = index;
+
+  if (index >= 0 && index < boneObjects.length) {
+    const bone = boneObjects[index];
+
+    // Highlight selected bone
+    bone.mesh.material.emissive.setHex(0x1a3a5a);
+    bone.mesh.material.emissiveIntensity = 0.4;
+
+    // Attach transform controls
+    transformControls.attach(bone.mesh);
+
+    // Show transform section
+    const section = document.getElementById('transform-section');
+    section.style.display = 'block';
+    document.getElementById('selected-bone-name').textContent = bone.name;
+
+    // Update transform inputs
+    const orig = bone.originalPosition;
+    document.getElementById('tx').value = Math.round(bone.mesh.position.x - orig.x);
+    document.getElementById('ty').value = Math.round(bone.mesh.position.y - orig.y);
+    document.getElementById('tz').value = Math.round(bone.mesh.position.z - orig.z);
+
+    // Focus camera on selected bone
+    orbitControls.target.copy(bone.mesh.position);
+  } else {
+    transformControls.detach();
+    document.getElementById('transform-section').style.display = 'none';
+  }
+
+  updateBoneList();
+};
+
+window.deselectAll = function() {
+  selectBone(-1);
+};
+
+window.selectAll = function() {
+  if (boneObjects.length > 0) selectBone(0);
+};
+
+// ===================== TRANSFORM =====================
+window.setGizmoMode = function(mode) {
+  transformControls.setMode(mode);
+  document.querySelectorAll('#gizmo-toolbar button').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + mode)?.classList.add('active');
+};
+
+window.applyTransform = function() {
+  if (selectedBoneIndex < 0) return;
+  const bone = boneObjects[selectedBoneIndex];
+  const tx = parseFloat(document.getElementById('tx').value) || 0;
+  const ty = parseFloat(document.getElementById('ty').value) || 0;
+  const tz = parseFloat(document.getElementById('tz').value) || 0;
+  bone.mesh.position.set(
+    bone.originalPosition.x + tx,
+    bone.originalPosition.y + ty,
+    bone.originalPosition.z + tz,
+  );
+};
+
+window.resetTransform = function() {
+  if (selectedBoneIndex < 0) return;
+  const bone = boneObjects[selectedBoneIndex];
+  bone.mesh.position.copy(bone.originalPosition);
+  bone.mesh.rotation.set(0, 0, 0);
+  bone.mesh.scale.set(1, 1, 1);
+  document.getElementById('tx').value = 0;
+  document.getElementById('ty').value = 0;
+  document.getElementById('tz').value = 0;
+};
+
+// ===================== BONE OPERATIONS =====================
+window.deleteBone = function() {
+  if (selectedBoneIndex < 0) return;
+  const bone = boneObjects[selectedBoneIndex];
+  transformControls.detach();
+  scene.remove(bone.mesh);
+  bone.mesh.geometry.dispose();
+  bone.mesh.material.dispose();
+  boneObjects.splice(selectedBoneIndex, 1);
+  selectedBoneIndex = -1;
+  document.getElementById('transform-section').style.display = 'none';
+  updateBoneList();
+};
+
+window.duplicateBone = function() {
+  if (selectedBoneIndex < 0) return;
+  const src = boneObjects[selectedBoneIndex];
+  const clone = src.mesh.clone();
+  clone.material = src.mesh.material.clone();
+  clone.position.x += 20; // Offset so it's visible
+  clone.name = src.name + '_copy';
+  scene.add(clone);
+
+  boneObjects.push({
+    mesh: clone,
+    name: clone.name,
+    color: src.color,
+    originalPosition: clone.position.clone(),
+    visible: true,
+    transparent: false,
+  });
+
+  selectBone(boneObjects.length - 1);
+  updateBoneList();
+};
+
+window.mirrorBone = function() {
+  if (selectedBoneIndex < 0) return;
+  const src = boneObjects[selectedBoneIndex];
+  const mirror = src.mesh.clone();
+  mirror.material = src.mesh.material.clone();
+  mirror.scale.x *= -1; // Mirror on X axis
+  mirror.name = src.name + '_mirror';
+  scene.add(mirror);
+
+  boneObjects.push({
+    mesh: mirror,
+    name: mirror.name,
+    color: src.color,
+    originalPosition: mirror.position.clone(),
+    visible: true,
+    transparent: false,
+  });
+
+  selectBone(boneObjects.length - 1);
+  updateBoneList();
+};
+
+// ===================== VISIBILITY =====================
+function toggleBoneVis(index) {
+  const bone = boneObjects[index];
+  bone.visible = !bone.visible;
+  bone.mesh.visible = bone.visible;
+  updateBoneList();
+}
+
+function toggleBoneTrans(index) {
+  const bone = boneObjects[index];
+  bone.transparent = !bone.transparent;
+  bone.mesh.material.transparent = bone.transparent;
+  bone.mesh.material.opacity = bone.transparent ? 0.3 : 1.0;
+  bone.mesh.material.depthWrite = !bone.transparent;
+  bone.mesh.material.needsUpdate = true;
+  updateBoneList();
+}
+
+// ===================== BONE LIST UI =====================
+function updateBoneList() {
+  const container = document.getElementById('bone-list');
+  container.innerHTML = boneObjects.map((b, i) => {
+    const sel = i === selectedBoneIndex ? 'selected' : '';
+    const vis = b.visible ? '👁' : '🚫';
+    const trans = b.transparent ? 'T' : '';
+    const colorHex = '#' + b.color.toString(16).padStart(6, '0');
+    return `<div class="bone-item ${sel}" onclick="selectBone(${i})">
+      <div class="bone-color" style="background:${colorHex}"></div>
+      <span class="bone-name">${b.name} ${trans}</span>
+      <span style="cursor:pointer" onclick="event.stopPropagation();toggleBoneVis(${i})">${vis}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('bone-count').textContent = `${boneObjects.length} objects`;
+}
+
+// Make functions global
+window.toggleBoneVis = toggleBoneVis;
+window.toggleBoneTrans = toggleBoneTrans;
+
+// ===================== CLEAR =====================
+function clearBones() {
+  transformControls.detach();
+  boneObjects.forEach(b => {
+    scene.remove(b.mesh);
+    b.mesh.geometry.dispose();
+    b.mesh.material.dispose();
+  });
+  boneObjects = [];
+  selectedBoneIndex = -1;
+  document.getElementById('transform-section').style.display = 'none';
+  updateBoneList();
+}
+
+// ===================== CAMERA =====================
+function fitCameraToBones() {
+  if (boneObjects.length === 0) return;
+  const box = new THREE.Box3();
+  boneObjects.forEach(b => box.expandByObject(b.mesh));
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const dist = maxDim * 1.8;
+
+  camera.position.set(center.x, center.y + dist * 0.3, center.z + dist);
+  orbitControls.target.copy(center);
+  camera.lookAt(center);
+  orbitControls.update();
+}
+
+// Focus on selected bone
+function focusSelectedBone() {
+  if (selectedBoneIndex < 0) return;
+  const bone = boneObjects[selectedBoneIndex];
+  const box = new THREE.Box3().setFromObject(bone.mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+
+  orbitControls.target.copy(center);
+  camera.position.set(center.x, center.y + maxDim * 0.5, center.z + maxDim * 2);
+  camera.lookAt(center);
+  orbitControls.update();
+}
+
+// ===================== KEYBOARD =====================
+document.addEventListener('keydown', (e) => {
+  // Don't capture if typing in input
+  if (e.target.tagName === 'INPUT') return;
+
+  switch(e.key) {
+    case 'g': case 'G': setGizmoMode('translate'); break;
+    case 'r': case 'R': setGizmoMode('rotate'); break;
+    case 's': case 'S': setGizmoMode('scale'); break;
+    case 'Delete': case 'Backspace': deleteBone(); e.preventDefault(); break;
+    case 'h': case 'H': if (selectedBoneIndex >= 0) toggleBoneVis(selectedBoneIndex); break;
+    case 'j': case 'J': if (selectedBoneIndex >= 0) toggleBoneTrans(selectedBoneIndex); break;
+    case 'm': case 'M': mirrorBone(); break;
+    case 'f': case 'F': focusSelectedBone(); break;
+    case 'Escape': deselectAll(); break;
+    case 'd':
+      if (e.ctrlKey || e.metaKey) { duplicateBone(); e.preventDefault(); }
+      break;
+  }
+});
+
+// ===================== RESIZE =====================
+window.addEventListener('resize', () => {
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// ===================== RENDER LOOP =====================
+function animate() {
+  requestAnimationFrame(animate);
+  orbitControls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// Hide loading on startup
+document.getElementById('loading').classList.add('hidden');
+document.getElementById('status-text').textContent = 'Ready — upload DICOM to begin';
+
 </script>
 </body>
 </html>
