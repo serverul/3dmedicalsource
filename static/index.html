@@ -683,22 +683,48 @@ window.toggleVis = toggleVis;
 // ============================================================
 window.uploadDicom = async function() {
   console.log('[upload] uploadDicom called');
-  console.log('[upload] files:', document.getElementById('dicom-input').files.length);
   const input = document.getElementById('dicom-input');
   if (!input.files.length) { alert('Select a DICOM folder'); return; }
   const loading = document.getElementById('loading');
   const progress = document.getElementById('load-progress');
   loading.classList.remove('hidden');
-  progress.textContent = 'Uploading DICOM files...';
 
-  const fd = new FormData();
-  for (const f of input.files) fd.append('files', f, f.webkitRelativePath || f.name);
-  fd.append('split_bones', document.getElementById('split-bones').checked ? 'true' : 'false');
+  const splitBones = document.getElementById('split-bones').checked;
+  const fileCount = input.files.length;
 
   try {
-    progress.textContent = 'Segmenting bones (30-60s)...';
-    console.log('[upload] sending request...');
-    const resp = await fetch('/api/upload-dicom-folder', {method:'POST', body:fd});
+    // ZIP the files in the browser first (much faster upload)
+    progress.textContent = `Zipping ${fileCount} DICOM files...`;
+    console.log('[upload] zipping', fileCount, 'files');
+
+    const {default: JSZip} = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
+    const zip = new JSZip();
+    let added = 0;
+    for (const f of input.files) {
+      const relPath = f.webkitRelativePath || f.name;
+      // Skip hidden files and non-DICOM
+      const name = f.name.toLowerCase();
+      if (name.startsWith('.')) continue;
+      zip.file(relPath, f);
+      added++;
+      if (added % 50 === 0) progress.textContent = `Zipping: ${added}/${fileCount} files...`;
+    }
+
+    progress.textContent = 'Compressing ZIP...';
+    const blob = await zip.generateAsync({type: 'blob', compression: 'STORE'}, (meta) => {
+      progress.textContent = `Compressing: ${meta.percent.toFixed(0)}%`;
+    });
+
+    console.log('[upload] ZIP size:', (blob.size / 1024 / 1024).toFixed(1), 'MB');
+    progress.textContent = `Uploading ${(blob.size / 1024 / 1024).toFixed(0)} MB...`;
+
+    const fd = new FormData();
+    fd.append('file', blob, 'dicom_upload.zip');
+    fd.append('split_bones', splitBones ? 'true' : 'false');
+    fd.append('sensitivity', 'high');
+
+    console.log('[upload] sending to /api/upload-dicom...');
+    const resp = await fetch('/api/upload-dicom', {method:'POST', body:fd});
     if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail||'Upload failed'); }
     const data = await resp.json();
     console.log('[upload] response:', data);
