@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <title>3DMedicalPlanner</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -693,7 +694,7 @@ window.uploadDicom = async function() {
 
   try {
     progress.textContent = 'Segmenting bones (30-60s)...';
-    const resp = await fetch('/api/upload-dicom', {method:'POST', body:fd});
+    const resp = await fetch('/api/upload-dicom-folder', {method:'POST', body:fd});
     if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail||'Upload failed'); }
     const data = await resp.json();
 
