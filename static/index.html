@@ -81,7 +81,7 @@ canvas{display:block}
     <!-- Upload -->
     <div class="section">
       <label>DICOM Upload</label>
-      <input type="file" id="dicom-input" webkitdirectory directory multiple accept=".dcm,.DCM,.ima,.IMA,application/dicom">
+      <input type="file" id="dicom-input" webkitdirectory directory multiple>
       <div class="section-row">
         <label style="font-size:11px"><input type="checkbox" id="split-bones" checked> Split bones (watershed)</label>
       </div>
@@ -499,6 +499,7 @@ window.executeCut = async function() {
     }
 
     const data = await resp.json();
+    console.log('[upload] response:', data);
     progress.textContent = 'Loading fragments...';
 
     // Remove original bone
@@ -681,6 +682,8 @@ window.toggleVis = toggleVis;
 //  UPLOAD
 // ============================================================
 window.uploadDicom = async function() {
+  console.log('[upload] uploadDicom called');
+  console.log('[upload] files:', document.getElementById('dicom-input').files.length);
   const input = document.getElementById('dicom-input');
   if (!input.files.length) { alert('Select a DICOM folder'); return; }
   const loading = document.getElementById('loading');
@@ -694,9 +697,11 @@ window.uploadDicom = async function() {
 
   try {
     progress.textContent = 'Segmenting bones (30-60s)...';
+    console.log('[upload] sending request...');
     const resp = await fetch('/api/upload-dicom-folder', {method:'POST', body:fd});
     if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail||'Upload failed'); }
     const data = await resp.json();
+    console.log('[upload] response:', data);
 
     caseId = data.case_id;
     progress.textContent = `Loading ${data.bone_count} bone(s)...`;
@@ -737,6 +742,7 @@ window.uploadDicom = async function() {
     setStatus(`Loaded ${data.bone_count} bone(s) — case ${caseId}`);
 
   } catch(e) {
+    console.error('[upload] ERROR:', e);
     setStatus('Error: ' + e.message);
   } finally {
     loading.classList.add('hidden');
