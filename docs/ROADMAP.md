@@ -1,141 +1,99 @@
-# Roadmap
+# Roadmap — 3DMedicalPlanner
 
 ## Product direction
 
-3DMedicalPlanner is not a generic DICOM viewer. Horos and VPOP already cover much of 2D/viewer planning. The target is:
+3DMedicalPlanner is not a generic DICOM viewer. The target is:
 
 ```txt
 3D CT-based patient-specific surgical CAD for bones
 ```
 
 Core value:
-
 - extract accurate bone model from CT
 - virtual osteotomy
 - fragment repositioning
 - patient-specific cutting/drill guides
 - patient-specific plates/implants
-- export STL/STEP-like manufacturing artifacts
+- exportable manufacturing files
 
-## Phase 1 — Segmentation Engine v2 (next)
+## Phase 1 — Segmentation Engine v2 ✅ COMPLETED
 
-Goal: reliable bone STL from real DICOM CT.
+- [x] Binary morphology: closing, opening, dilation, erosion, fill holes
+- [x] Remove small islands by physical volume (mm³)
+- [x] ROI auto-crop around bone voxels
+- [x] PCA axis alignment
+- [x] Mesh cleanup: smoothing, decimation, repair, manifold report
+- [x] Segmentation presets: long_bone, skull, spine, cortical, metal
+- [x] Export segmentation parameters JSON with every STL
 
-Tasks:
+## Phase 2 — MPR Slice Viewer ✅ COMPLETED
 
-- [ ] Add binary morphology controls:
-  - closing
-  - opening
-  - dilation/erosion
-  - fill holes
-- [ ] Remove small islands by voxel count / physical volume.
-- [ ] ROI crop:
-  - automatic bounding box around thresholded bone
-  - manual crop controls later
-- [ ] Axis alignment:
-  - PCA on bone voxels/mesh
-  - align long axis to chosen CAD axis
-- [ ] Mesh cleanup:
-  - smoothing
-  - decimation
-  - hole fill
-  - normals repair
-  - manifold/watertight report
-- [ ] Add segmentation presets:
-  - skull/maxillofacial
-  - long bone
-  - spine
-  - high-density cortical
-  - metal artifact cutoff
-- [ ] Export segmentation parameters JSON with every STL.
+- [x] Axial/coronal/sagittal slice extraction as PNG
+- [x] HU window/level controls
+- [x] Segmentation mask overlay on slices
+- [x] Volume info and slice range endpoints
+- [x] Volume caching (.npy) for fast access
 
-## Phase 2 — DICOM/segmentation preview
+## Phase 3 — Advanced Osteotomy Planning ✅ COMPLETED
 
-Goal: users must see/validate segmentation before CAD.
+- [x] Interactive 3-point plane definition
+- [x] Multi-plane osteotomy (up to 3 planes)
+- [x] Named fragments with color coding
+- [x] Fragment transform editor (translate/rotate per fragment)
+- [x] Measurement tools: distance, angle, bone length
+- [x] Export per-fragment STLs + combined plan JSON
+- [x] Export ZIP with all fragments
 
-Tasks:
+## Phase 4 — Conformal Surgical Guides ✅ COMPLETED
 
-- [ ] Add axial slice preview in browser.
-- [ ] HU window/level controls.
-- [ ] Overlay threshold mask on slice.
-- [ ] Scroll through slices.
-- [ ] Show selected series metadata.
-- [ ] Show voxel spacing and physical dimensions.
-- [ ] Add warnings for low slice count / anisotropic spacing / extreme HU values.
+- [x] Interactive contact patch selection (radius-based)
+- [x] Conformal pad generation from patch
+- [x] Mesh boolean operations (difference/union/intersection)
+- [x] Guide body solidification
+- [x] Saw slot from osteotomy plane
+- [x] Drill/pin sleeves
 
-## Phase 3 — Osteotomy planning
+## Phase 5 — Drill/Screw Trajectory Editor ✅ COMPLETED
 
-Goal: more precise virtual surgery.
+- [x] Add screw trajectories (entry point + direction)
+- [x] Control length, diameter, name
+- [x] Collision detection with bone
+- [x] Generate drill guide sleeves STL
+- [x] CRUD operations on trajectories
 
-Tasks:
+## Phase 6 — Patient-Specific Plate Generator ✅ COMPLETED
 
-- [ ] Interactive plane widget instead of axis-only plane.
-- [ ] Plane from 3 points / landmarks.
-- [ ] Multiple osteotomy planes.
-- [ ] Store named fragments.
-- [ ] Transform gizmo for fragment movement.
-- [ ] Before/after measurement tools.
-- [ ] Export per-fragment transforms and STL.
+- [x] Centerline-based plate generation
+- [x] Width/thickness controls
+- [x] Automatic screw hole placement
+- [x] Boolean subtraction of screw holes
+- [x] Export STL
 
-## Phase 4 — Conformal surgical guides
+## Phase 7 — Undo/Redo System ✅ COMPLETED
 
-Goal: patient-specific guides that fit the bone.
+- [x] Per-case undo/redo stack (max 50 actions)
+- [x] Snapshot-based state restoration
+- [x] Action history with timestamps
+- [x] Keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
+- [x] Persistence to disk
 
-Tasks:
+## Phase 8 — Case Management & Utilities ✅ COMPLETED
 
-- [ ] Interactive contact patch selection on mesh.
-- [ ] Generate negative/contact surface from selected patch.
-- [ ] Clearance offset control.
-- [ ] Guide body solidification.
-- [ ] Saw slot from osteotomy plane/instrument library.
-- [ ] Drill/pin sleeves.
-- [ ] Cooling/irrigation channel option.
-- [ ] Validate thickness and watertightness.
+- [x] Case metadata CRUD (patient_id, description, status)
+- [x] Audit log (auto-tracked on every operation)
+- [x] Named snapshots of case state
+- [x] Surgical plan report (JSON)
+- [x] DICOM anonymization (26 tags)
+- [x] Mesh mirror/reflection
+- [x] Cephalometry (SNA, SNB, ANB, FMA, distances)
 
-## Phase 5 — Drill/screw trajectory editor
+## Future Enhancements
 
-Tasks:
-
-- [ ] Add screw axis objects.
-- [ ] Control entry point, direction, length, diameter.
-- [ ] Visualize collision/intersection with bone.
-- [ ] Export screw/drill JSON.
-- [ ] Use trajectories to generate drill sleeves and plate holes.
-
-## Phase 6 — Patient-specific plate generator
-
-Tasks:
-
-- [ ] Draw/select centerline on bone.
-- [ ] Fit plate surface to anatomy.
-- [ ] Width/thickness controls.
-- [ ] Screw hole generator.
-- [ ] Screw trajectory integration.
-- [ ] Export STL initially; later STEP via FreeCAD/OpenCascade.
-
-## Phase 7 — Robust CAD backend
-
-Tasks:
-
-- [ ] Integrate FreeCAD/OpenCascade for solids and STEP export.
-- [ ] Add Blender fallback for mesh booleans.
-- [ ] Add mesh repair pipeline.
-- [ ] Validate exports with automated checks.
-
-## Phase 8 — Case management / collaboration
-
-Tasks:
-
-- [ ] Cases, patients, clinicians, engineers.
-- [ ] Upload/download storage.
-- [ ] Audit log.
-- [ ] Plan versions.
-- [ ] Approval workflow.
-- [ ] PDF surgical plan report.
-- [ ] Portal integration.
-
-## Non-goals for now
-
-- Do not rebuild Horos.
-- Do not prioritize website/marketing.
-- Do not claim medical-device readiness.
+- [ ] AI-assisted segmentation (cloud-based model)
+- [ ] PACS integration
+- [ ] Multi-user collaboration (SignalR real-time)
+- [ ] PDF report generation
+- [ ] STEP export via FreeCAD/OpenCascade
+- [ ] Blender fallback for mesh booleans
+- [ ] User authentication
+- [ ] Cloud storage sync
