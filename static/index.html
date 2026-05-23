@@ -14,6 +14,18 @@
     .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}button{width:100%;padding:11px 12px;border:0;border-radius:12px;background:var(--accent);color:#06101d;font-weight:800;cursor:pointer;margin-top:12px}button.secondary{background:#243653;color:#d9e7ff}button:disabled{opacity:.5;cursor:wait}
     .drop{border:1px dashed #49617f;border-radius:14px;padding:14px;text-align:center;background:#07101f;color:var(--muted)}.drop input{border:0;background:transparent;padding:8px}.status{margin-top:12px;padding:10px;border-radius:12px;background:#07101f;border:1px solid var(--line)}.pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.ok{background:#12351f;color:#85efa5}.bad{background:#431b1b;color:#ff9b9b}.warn{background:#4a330d;color:#ffd17a}
     pre{white-space:pre-wrap;word-break:break-word;background:#060c17;border:1px solid var(--line);border-radius:12px;padding:10px;color:#d9e7ff;max-height:260px;overflow:auto}.downloads{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}.downloads a{display:block;text-decoration:none;color:#c9e9ff;background:#14233a;border:1px solid #2e4568;padding:9px;border-radius:10px}.hint{font-size:12px;color:var(--muted);margin-top:8px}.toolbar{position:absolute;left:12px;top:12px;z-index:2;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--muted)}
+    .undo-bar{position:absolute;left:12px;top:12px;z-index:2;display:flex;gap:6px;align-items:center;background:#070b13cc;border:1px solid var(--line);border-radius:12px;padding:6px 10px}
+    .undo-btn{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--muted);padding:4px 10px;cursor:pointer;font-size:16px;font-weight:700;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px}
+    .undo-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:#0d1a2e}
+    .undo-btn:disabled{opacity:.25;cursor:not-allowed}
+    .undo-label{color:var(--muted);font-size:11px;margin-left:4px;white-space:nowrap}
+    .history-panel{position:absolute;left:12px;top:56px;z-index:2;background:#070b13ee;border:1px solid var(--line);border-radius:12px;padding:10px;min-width:260px;max-height:320px;overflow:auto;display:none}
+    .history-panel.open{display:block}
+    .hist-item{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #1a2538;font-size:12px;color:var(--muted)}
+    .hist-item:last-child{border-bottom:none}
+    .hist-name{color:#c9e7ff;font-weight:600}
+    .hist-time{color:#6b7fa3;font-size:10px}
+    .hist-empty{color:var(--muted);font-size:12px;text-align:center;padding:8px}
     @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}.viewer{height:60vh}}
   </style>
 </head>
@@ -144,6 +156,13 @@
 
   <main class="panel viewer" id="viewer">
     <div class="toolbar">Mouse: rotate · wheel: zoom · right click: pan</div>
+    <div class="undo-bar" id="undoBar">
+      <button class="undo-btn" id="undoBtn" onclick="doUndo()" title="Undo (Ctrl+Z)">↶</button>
+      <button class="undo-btn" id="redoBtn" onclick="doRedo()" title="Redo (Ctrl+Shift+Z)">↷</button>
+      <button class="undo-btn" id="historyBtn" onclick="toggleHistory()" title="Action history">☰</button>
+      <span class="undo-label" id="undoLabel"></span>
+    </div>
+    <div class="history-panel" id="historyPanel"></div>
   </main>
 </div>
 
@@ -401,6 +420,98 @@ window.runConformal=async()=>{
 };
 $('axis').addEventListener('change',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
 $('offset').addEventListener('input',()=>addPlaneHelper($('axis').value,Number($('offset').value||0)));
+
+// -- Undo/Redo --
+async function fetchHistory(){
+  if(!caseId) return null;
+  try{
+    const r=await fetch(`/api/cases/${caseId}/history`);
+    if(!r.ok) return null;
+    return await r.json();
+  }catch{ return null; }
+}
+
+async function updateUndoUI(){
+  const h=await fetchHistory();
+  const uBtn=$('undoBtn'), rBtn=$('redoBtn'), lbl=$('undoLabel');
+  if(!h){ uBtn.disabled=true; rBtn.disabled=true; lbl.textContent=''; return; }
+  uBtn.disabled=!h.can_undo;
+  rBtn.disabled=!h.can_redo;
+  const uName=h.undo_stack?.length ? h.undo_stack[h.undo_stack.length-1].name : '';
+  const rName=h.redo_stack?.length ? h.redo_stack[h.redo_stack.length-1].name : '';
+  let tip='';
+  if(uName) tip+=`Undo: ${uName}`;
+  if(rName) tip+=tip?` | Redo: ${rName}`:`Redo: ${rName}`;
+  lbl.textContent=tip;
+}
+
+async function doUndo(){
+  if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
+  const r=await fetch(`/api/cases/${caseId}/undo`,{method:'POST'});
+  if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Undo failed'); return; }
+  const j=await r.json();
+  await updateUndoUI();
+  // Reload viewer to reflect restored state
+  clearMeshes();
+  await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
+  // Also reload any output fragments if they exist
+  const posUrl=`/api/cases/${caseId}/outputs/fragment_positive.stl?t=${Date.now()}`;
+  const negUrl=`/api/cases/${caseId}/outputs/fragment_negative.stl?t=${Date.now()}`;
+  fetch(posUrl).then(r=>r.ok?loadStl(posUrl,0x60a5fa,.92):null).catch(()=>{});
+  fetch(negUrl).then(r=>r.ok?loadStl(negUrl,0xf97316,.92):null).catch(()=>{});
+  $('info').textContent=JSON.stringify({undone:j.undone,history:j.history},null,2);
+}
+
+async function doRedo(){
+  if(!caseId){ setStatus('cutStatus',false,'No case loaded.'); return; }
+  const r=await fetch(`/api/cases/${caseId}/redo`,{method:'POST'});
+  if(!r.ok){ const j=await r.catch(()=>({})); setStatus('cutStatus',false,j.detail||'Redo failed'); return; }
+  const j=await r.json();
+  await updateUndoUI();
+  clearMeshes();
+  await loadStl(`/api/cases/${caseId}/input.stl?t=${Date.now()}`,0xd8e7ff,1);
+  const posUrl=`/api/cases/${caseId}/outputs/fragment_positive.stl?t=${Date.now()}`;
+  const negUrl=`/api/cases/${caseId}/outputs/fragment_negative.stl?t=${Date.now()}`;
+  fetch(posUrl).then(r=>r.ok?loadStl(posUrl,0x60a5fa,.92):null).catch(()=>{});
+  fetch(negUrl).then(r=>r.ok?loadStl(negUrl,0xf97316,.92):null).catch(()=>{});
+  $('info').textContent=JSON.stringify({redone:j.redone,history:j.history},null,2);
+}
+
+async function toggleHistory(){
+  const panel=$('historyPanel');
+  if(panel.classList.contains('open')){ panel.classList.remove('open'); return; }
+  const h=await fetchHistory();
+  if(!h){ panel.innerHTML='<div class="hist-empty">No history available</div>'; panel.classList.add('open'); return; }
+  let html='';
+  const fmtTs=t=>{ if(!t) return ''; const d=new Date(t*1000); return d.toLocaleTimeString(); };
+  if(h.undo_stack?.length){
+    html+='<div style="color:var(--accent);font-size:11px;font-weight:700;margin-bottom:4px">Undo stack</div>';
+    for(const a of [...h.undo_stack].reverse()){
+      html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
+    }
+  }
+  if(h.redo_stack?.length){
+    html+='<div style="color:var(--warn);font-size:11px;font-weight:700;margin:6px 0 4px">Redo stack</div>';
+    for(const a of [...h.redo_stack].reverse()){
+      html+=`<div class="hist-item"><span class="hist-name">${esc(a.name)}</span><span class="hist-time">${fmtTs(a.timestamp)}</span></div>`;
+    }
+  }
+  if(!html) html='<div class="hist-empty">No actions recorded yet</div>';
+  panel.innerHTML=html;
+  panel.classList.add('open');
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown',e=>{
+  if(e.ctrlKey && e.key==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); }
+  if(e.ctrlKey && e.key==='z' && e.shiftKey){ e.preventDefault(); doRedo(); }
+  if(e.ctrlKey && e.key==='y'){ e.preventDefault(); doRedo(); }
+});
+
+// Refresh undo UI whenever caseId changes
+const _origEnableCad=enableCadButtons;
+function enableCadButtons(){ _origEnableCad(); updateUndoUI(); }
+
 init();
 </script>
 </body>

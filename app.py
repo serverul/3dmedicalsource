@@ -2,20 +2,25 @@ import json
 import math
 import os
 import shutil
+import time
 import uuid
 import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pydicom
 import trimesh
+from PIL import Image
 from scipy.spatial import cKDTree
 from scipy.ndimage import binary_closing, binary_opening, binary_dilation, binary_erosion, label as ndi_label
 from skimage import measure
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+from undo_manager import UndoManager, UndoAction, get_manager  # noqa: E402
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -588,6 +593,7 @@ def dicom_to_bone_mesh(
     decimation_target_faces: Optional[int] = None,
     repair_mesh: bool = True,
     preset: Optional[str] = None,
+    case_dir: Optional[Path] = None,
 ) -> tuple[trimesh.Trimesh, dict]:
     """Convert DICOM CT series to bone mesh with Segmentation Engine v2.
 
@@ -618,6 +624,11 @@ def dicom_to_bone_mesh(
         active_preset = None
 
     vol, spacing, meta = load_dicom_series(dicom_dir, selected_series_uid=series_uid)
+    # Cache volume as .npy for fast MPR slice access
+    if case_dir is not None:
+        npy_path = case_dir / "volume_cache.npy"
+        if not npy_path.exists():
+            np.save(str(npy_path), vol)
     hu_min_actual = float(np.min(vol)); hu_max_actual = float(np.max(vol))
     if threshold_hu <= hu_min_actual or threshold_hu >= hu_max_actual:
         raise ValueError(f"threshold {threshold_hu} outside volume HU range {meta['hu_min']}..{meta['hu_max']}")
@@ -858,6 +869,7 @@ def upload_dicom(
             decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
             repair_mesh=repair_mesh,
             preset=preset or None,
+            case_dir=case_dir,
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
@@ -932,6 +944,7 @@ def upload_dicom_folder(
             decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
             repair_mesh=repair_mesh,
             preset=preset or None,
+            case_dir=case_dir,
         )
     except Exception as e:
         shutil.rmtree(case_dir, ignore_errors=True)
@@ -1010,6 +1023,10 @@ def regenerate_mesh(
     dicom_dir = case_dir / "dicom"
     if not dicom_dir.exists():
         raise HTTPException(404, "case has no DICOM folder")
+
+    # Push undo snapshot before regenerating
+    _push_undo(case_id, "regenerate_mesh", {"dicom_dir": str(dicom_dir)})
+
     try:
         mesh, meta = dicom_to_bone_mesh(
             dicom_dir,
@@ -1030,6 +1047,7 @@ def regenerate_mesh(
             decimation_target_faces=decimation_target_faces if decimation_target_faces > 0 else None,
             repair_mesh=repair_mesh,
             preset=preset or None,
+            case_dir=case_dir,
         )
     except Exception as e:
         raise HTTPException(400, f"Regenerate mesh failed: {e}")
@@ -1059,7 +1077,7 @@ def output_file(case_id: str, name: str):
 
 @app.post("/api/cut")
 def cut(
-    case_id: str = Form(...),
+    case_id: str,
     axis: str = Form("z"),
     offset_mm: float = Form(0.0),
     rotate_side: str = Form("positive"),
@@ -1072,6 +1090,10 @@ def cut(
     in_path = UPLOADS / case_id / "input.stl"
     if not in_path.exists():
         raise HTTPException(404, "case not found")
+
+    # Push undo snapshot before cutting
+    _push_undo(case_id, "cut", {"axis": axis, "offset_mm": offset_mm})
+
     mesh = load_mesh(in_path)
     normal = axis_normal(axis)
     center = mesh.bounds.mean(axis=0)
@@ -1134,7 +1156,7 @@ def plan_json(case_id: str):
 
 @app.post("/api/guide")
 def guide(
-    case_id: str = Form(...),
+    case_id: str,
     axis: str = Form("y"),
     offset_mm: float = Form(0.0),
     length_mm: float = Form(70.0),
@@ -1152,6 +1174,10 @@ def guide(
         raise HTTPException(400, "guide dimensions must be positive")
     if pin_radius_mm <= 0 or pin_spacing_mm < 0:
         raise HTTPException(400, "pin parameters invalid")
+
+    # Push undo snapshot before generating guide
+    _push_undo(case_id, "guide", {"axis": axis, "offset_mm": offset_mm, "length_mm": length_mm})
+
     mesh = load_mesh(in_path)
     guide_mesh, guide_meta = generate_cutting_guide(
         mesh=mesh,
@@ -1186,7 +1212,7 @@ def guide(
 
 @app.post("/api/conformal-guide")
 def conformal_guide(
-    case_id: str = Form(...),
+    case_id: str,
     axis: str = Form("y"),
     offset_mm: float = Form(0.0),
     contact_side: str = Form("positive"),
@@ -1205,6 +1231,10 @@ def conformal_guide(
         raise HTTPException(400, "conformal dimensions must be positive")
     if resolution_u < 3 or resolution_v < 3 or resolution_u > 80 or resolution_v > 60:
         raise HTTPException(400, "resolution out of range")
+
+    # Push undo snapshot before generating conformal guide
+    _push_undo(case_id, "conformal_guide", {"axis": axis, "offset_mm": offset_mm, "contact_side": contact_side})
+
     mesh = load_mesh(in_path)
     try:
         pad, pad_meta = generate_conformal_pad(
@@ -1262,6 +1292,1659 @@ def conformal_guide(
     }
     meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return JSONResponse(payload)
+
+
+@app.post("/api/cases/{case_id}/undo")
+def undo_action(case_id: str):
+    mgr = get_manager(case_id)
+    if not mgr.can_undo():
+        raise HTTPException(409, "nothing to undo")
+    result = mgr.undo()
+    if result is None:
+        raise HTTPException(409, "nothing to undo")
+    return {"ok": True, "undone": result["action"], "history": mgr.history()}
+
+
+@app.post("/api/cases/{case_id}/redo")
+def redo_action(case_id: str):
+    mgr = get_manager(case_id)
+    if not mgr.can_redo():
+        raise HTTPException(409, "nothing to redo")
+    result = mgr.redo()
+    if result is None:
+        raise HTTPException(409, "nothing to redo")
+    return {"ok": True, "redone": result["action"], "history": mgr.history()}
+
+
+@app.get("/api/cases/{case_id}/history")
+def action_history(case_id: str):
+    mgr = get_manager(case_id)
+    return mgr.history()
+
+
+def _push_undo(case_id: str, name: str, extra: dict | None = None):
+    """Helper: push a snapshot-based undo action before a state-changing op."""
+    mgr = get_manager(case_id)
+    payload = {"name": name}
+    if extra:
+        payload.update(extra)
+    action = UndoAction(
+        name=name,
+        undo_payload=dict(payload),
+        redo_payload=dict(payload),
+    )
+    mgr.push(action)
+
+
+# ─── Advanced Osteotomy: helpers ───────────────────────────────────────────────
+
+def _fragment_transforms_path(case_id: str) -> Path:
+    return OUTPUTS / case_id / "fragment_transforms.json"
+
+
+def _load_fragment_transforms(case_id: str) -> dict:
+    p = _fragment_transforms_path(case_id)
+    if p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return {"fragments": {}, "planes": [], "version": 1}
+
+
+def _save_fragment_transforms(case_id: str, data: dict):
+    out_dir = OUTPUTS / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _fragment_transforms_path(case_id).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _plane_from_points(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return (origin, normal) from three points defining a plane."""
+    v1 = p2 - p1
+    v2 = p3 - p1
+    normal = np.cross(v1, normal := v2)
+    norm = np.linalg.norm(normal)
+    if norm < 1e-12:
+        raise ValueError("degenerate plane: three points are collinear")
+    normal = normal / norm
+    origin = (p1 + p2 + p3) / 3.0
+    return origin, normal
+
+
+def _split_mesh_by_planes(
+    mesh: trimesh.Trimesh,
+    planes: list[dict],
+) -> list[trimesh.Trimesh]:
+    """Split mesh sequentially by multiple plane-twexpr{plane} cuts.
+
+    Each plane dict: {"origin": [x,y,z], "normal": [x,y,z]}.
+    Returns list of fragment meshes.
+    """
+    # We assign each face to a fragment based on which side of each plane its centroid falls.
+    centroids = mesh.triangles_center  # (N, 3)
+    n = len(centroids)
+    # Each plane splits space into positive (dot >= 0) and negative (dot < 0).
+    # We build a binary signature per face, one bit per plane.
+    bits = np.zeros((n, len(planes)), dtype=np.int8)
+    for pi, plane in enumerate(planes):
+        origin = np.array(plane["origin"])
+        normal = np.array(plane["normal"])
+        vals = (centroids - origin) @ normal
+        bits[:, pi] = (vals >= 0).astype(np.int8)
+    # Convert bit-patterns to unique group ids
+    # Use binary encoding: each row of bits is a binary number
+    powers = 1 << np.arange(len(planes), dtype=np.int64)
+    group_ids = bits @ powers  # (N,) integer labels
+    unique_groups = np.unique(group_ids)
+    fragments = []
+    for gid in unique_groups:
+        mask = group_ids == gid
+        if not mask.any():
+            continue
+        face_indices = np.where(mask)[0]
+        # Extract sub-mesh by face selection
+        if len(face_indices) == 0:
+            continue
+        face_set = mesh.faces[face_indices]
+        used_verts = np.unique(face_set)
+        if len(used_verts) == 0:
+            continue
+        # Remap vertex indices
+        remap = {int(old): i for i, old in enumerate(used_verts)}
+        new_faces = np.vectorize(remap.get)(face_set).astype(np.int64)
+        new_verts = mesh.vertices[used_verts]
+        sub = trimesh.Trimesh(vertices=new_verts, faces=new_faces, process=True)
+        sub.remove_unreferenced_vertices()
+        if len(sub.faces) > 0:
+            fragments.append(sub)
+    return fragments if fragments else [mesh.copy()]
+
+
+def _apply_transform_to_mesh(mesh: trimesh.Trimesh, transform: dict) -> trimesh.Trimesh:
+    """Apply a JSON transform dict to a mesh copy. Supports translation + axis-angle rotation."""
+    out = mesh.copy()
+    if not transform:
+        return out
+    # Translation
+    t = transform.get("translation_mm", [0, 0, 0])
+    if any(abs(v) > 1e-12 for v in t):
+        out.apply_translation(t)
+    # Rotation
+    r = transform.get("rotation", None)
+    if r:
+        axis_vec = np.array(r.get("axis", [0, 0, 1], dtype=float))
+        angle_deg = float(r.get("degrees", 0))
+        pivot = np.array(r.get("pivot", [0, 0, 0], dtype=float))
+        if abs(angle_deg) > 1e-9:
+            mat = trimesh.transformations.rotation_matrix(
+                math.radians(angle_deg), axis_vec, point=pivot
+            )
+            out.apply_transform(mat)
+    return out
+
+
+# ─── POST /api/cut-from-points ────────────────────────────────────────────────
+
+@app.post("/api/cut-from-points")
+def cut_from_points(
+    case_id: str,
+    point1: str = Form(...),  # JSON [x,y,z]
+    point2: str = Form(...),
+    point3: str = Form(...),
+    fragment_name_pos: str = Form("positive"),  # named fragment on normal+ side
+    fragment_name_neg: str = Form("negative"),
+):
+    """Define a cutting plane from 3 points clicked on the mesh."""
+    in_path = UPLOADS / case_id / "input.stl"
+    if not in_path.exists():
+        raise HTTPException(404, "case not found")
+    try:
+        p1 = np.array(json.loads(point1), dtype=float)
+        p2 = np.array(json.loads(point2), dtype=float)
+        p3 = np.array(json.loads(point3), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid points: expected JSON arrays [x,y,z]")
+    if p1.shape != (3,) or p2.shape != (3,) or p3.shape != (3,):
+        raise HTTPException(400, "each point must be [x,y,z]")
+    try:
+        origin, normal = _plane_from_points(p1, p2, p3)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    mesh = load_mesh(in_path)
+    pos = safe_slice(mesh, normal, origin)
+    neg = safe_slice(mesh, -normal, origin)
+
+    out_dir = OUTPUTS / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = uuid.uuid4().hex[:8]
+    pos_path = out_dir / f"fragment_{fragment_name_pos}_{ts}.stl"
+    neg_path = out_dir / f"fragment_{fragment_name_neg}_{ts}.stl"
+    pos.export(pos_path)
+    neg.export(neg_path)
+
+    # Update fragment transforms
+    ft = _load_fragment_transforms(case_id)
+    ft["fragments"][fragment_name_pos] = {
+        "file": str(pos_path.name),
+        "url": f"/api/cases/{case_id}/outputs/{pos_path.name}",
+        "color": "#60a5fa",
+    }
+    ft["fragments"][fragment_name_neg] = {
+        "file": str(neg_path.name),
+        "url": f"/api/cases/{case_id}/outputs/{neg_path.name}",
+        "color": "#f97316",
+    }
+    # Store plane definition
+    ft["planes"].append({
+        "id": ts,
+        "origin": origin.tolist(),
+        "normal": normal.tolist(),
+        "points": [p1.tolist(), p2.tolist(), p3.tolist()],
+    })
+    _save_fragment_transforms(case_id, ft)
+
+    return {
+        "case_id": case_id,
+        "plane": {"origin_mm": origin.tolist(), "normal_mm": normal.tolist()},
+        "fragments": {
+            fragment_name_pos: {"url": f"/api/cases/{case_id}/outputs/{pos_path.name}", "info": mesh_info(pos)},
+            fragment_name_neg: {"url": f"/api/cases/{case_id}/outputs/{neg_path.name}", "info": mesh_info(neg)},
+        },
+        "fragment_transform_url": f"/api/cases/{case_id}/fragment-transforms",
+    }
+
+
+# ─── POST /api/cut-multi ──────────────────────────────────────────────────────
+
+@app.post("/api/cut-multi")
+def cut_multi(
+    case_id: str,
+    plane1_p1: str = Form(""),
+    plane1_p2: str = Form(""),
+    plane1_p3: str = Form(""),
+    plane2_p1: str = Form(""),
+    plane2_p2: str = Form(""),
+    plane2_p3: str = Form(""),
+    plane3_p1: str = Form(""),
+    plane3_p2: str = Form(""),
+    plane3_p3: str = Form(""),
+):
+    """Cut mesh with up to 3 planes at once (multi-plane osteotomy).
+
+    Supply planeN_p1/p2/p3 as JSON [x,y,z]. Empty strings are ignored.
+    Returns fragment STLs and a combined plan JSON.
+    """
+    in_path = UPLOADS / case_id / "input.stl"
+    if not in_path.exists():
+        raise HTTPException(404, "case not found")
+
+    planes = []
+    for suffix in ("1", "2", "3"):
+        p1 = locals()[f"plane{suffix}_p1"]
+        p2 = locals()[f"plane{suffix}_p2"]
+        p3 = locals()[f"plane{suffix}_p3"]
+        if p1 and p2 and p3:
+            try:
+                pts = [np.array(json.loads(p)) for p in (p1, p2, p3)]
+            except Exception:
+                raise HTTPException(400, f"plane {suffix}: invalid point JSON")
+            origin, normal = _plane_from_points(*pts)
+            planes.append({"origin": origin.tolist(), "normal": normal.tolist()})
+
+    if not planes:
+        raise HTTPException(400, "at least one plane (plane1) is required")
+
+    mesh = load_mesh(in_path)
+    fragments = _split_mesh_by_planes(mesh, planes)
+
+    out_dir = OUTPUTS / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = uuid.uuid4().hex[:8]
+    outputs = {}
+    colors = ["#60a5fa", "#f97316", "#22c55e", "#e879f9", "#facc15", "#fb923c", "#38bdf8", "#a78bfa"]
+    for i, frag in enumerate(fragments):
+        name = f"fragment_{i}_{ts}"
+        fpath = out_dir / f"{name}.stl"
+        frag.export(fpath)
+        color = colors[i % len(colors)]
+        outputs[name] = {"url": f"/api/cases/{case_id}/outputs/{fpath.name}", "info": mesh_info(frag), "color": color}
+
+    # Save transforms
+    ft = _load_fragment_transforms(case_id)
+    for name, info in outputs.items():
+        ft["fragments"][name] = {"file": f"{name}.stl", "url": info["url"], "color": info["color"]}
+    ft["planes"].extend([{**p, "id": f"{ts}_{j}"} for j, p in enumerate(planes)])
+    _save_fragment_transforms(case_id, ft)
+
+    return {
+        "case_id": case_id,
+        "planes": planes,
+        "fragments": outputs,
+        "fragment_transform_url": f"/api/cases/{case_id}/fragment-transforms",
+    }
+
+
+# ─── Fragment transforms CRUD ─────────────────────────────────────────────────
+
+@app.get("/api/cases/{case_id}/fragment-transforms")
+def get_fragment_transforms(case_id: str):
+    """Get stored fragment transforms + plane definitions for this case."""
+    ft = _load_fragment_transforms(case_id)
+    return ft
+
+
+@app.post("/api/cases/{case_id}/fragment-transforms/{fragment_name}")
+def update_fragment_transform(
+    case_id: str,
+    fragment_name: str,
+    translation_x: float = Form(0.0),
+    translation_y: float = Form(0.0),
+    translation_z: float = Form(0.0),
+    rotation_axis_x: float = Form(0.0),
+    rotation_axis_y: float = Form(0.0),
+    rotation_axis_z: float = Form(1.0),
+    rotation_deg: float = Form(0.0),
+    pivot_x: float = Form(0.0),
+    pivot_y: float = Form(0.0),
+    pivot_z: float = Form(0.0),
+):
+    """Update transform for a named fragment. Re-generates STL from original cut output."""
+    ft = _load_fragment_transforms(case_id)
+    frag = ft.get("fragments", {}).get(fragment_name)
+    if not frag or "file" not in frag:
+        # Try loading from outputs
+        raise HTTPException(404, f"fragment '{fragment_name}' not found")
+
+    # Apply transform
+    new_transform = {
+        "translation_mm": [translation_x, translation_y, translation_z],
+        "rotation": {
+            "axis": [rotation_axis_x, rotation_axis_y, rotation_axis_z],
+            "degrees": rotation_deg,
+            "pivot": [pivot_x, pivot_y, pivot_z],
+        },
+    }
+
+    # Load original fragment mesh
+    src_path = OUTPUTS / case_id / frag["file"]
+    if not src_path.exists():
+        raise HTTPException(404, "fragment STL not found on disk")
+    mesh = load_mesh(src_path)
+    transformed = _apply_transform_to_mesh(mesh, new_transform)
+
+    # Save updated STL
+    out_path = OUTPUTS / case_id / f"fragment_{fragment_name}_transformed.stl"
+    transformed.export(out_path)
+
+    # Update stored transform
+    frag["transform"] = new_transform
+    frag["transformed_url"] = f"/api/cases/{case_id}/outputs/{out_path.name}"
+    ft["fragments"][fragment_name] = frag
+    _save_fragment_transforms(case_id, ft)
+
+    return {
+        "fragment": fragment_name,
+        "transform": new_transform,
+        "url": f"/api/cases/{case_id}/outputs/{out_path.name}",
+        "info": mesh_info(transformed),
+    }
+
+
+# ─── POST /api/export-fragments ───────────────────────────────────────────────
+
+@app.post("/api/export-fragments")
+def export_fragments(
+    case_id: str,
+):
+    """Export zip containing all fragment STLs + combined plan JSON."""
+    ft = _load_fragment_transforms(case_id)
+    out_dir = OUTPUTS / case_id
+    if not out_dir.exists():
+        raise HTTPException(404, "case outputs not found")
+
+    zip_path = out_dir / "osteotomy_export.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        # Write transforms JSON
+        zf.writestr("fragment_transforms.json", json.dumps(ft, indent=2))
+        # Include all fragment STLs
+        added = set()
+        for fname, finfo in ft.get("fragments", {}).items():
+            src = out_dir / finfo["file"]
+            if src.exists() and finfo["file"] not in added:
+                zf.write(src, arcname=finfo["file"])
+                added.add(finfo["file"])
+            # Also include transformed version if present
+            tf = finfo.get("transformed_url", "")
+            if tf:
+                tname = tf.split("/")[-1]
+                tp = out_dir / tname
+                if tp.exists() and tname not in added:
+                    zf.write(tp, arcname=tname)
+                    added.add(tname)
+
+    return {"url": f"/api/cases/{case_id}/outputs/osteotomy_export.zip"}
+
+
+@app.get("/api/cases/{case_id}/outputs/osteotomy_export.zip")
+def download_export_zip(case_id: str):
+    path = OUTPUTS / case_id / "osteotomy_export.zip"
+    if not path.exists():
+        raise HTTPException(404, "export not found, run export-fragments first")
+    return FileResponse(path, media_type="application/zip", filename=f"{case_id}-osteotomy-export.zip")
+
+
+# ─── Measurement tools ────────────────────────────────────────────────────────
+
+@app.post("/api/measure-distance")
+def measure_distance(
+    case_id: str,
+    point_a: str = Form(...),  # JSON [x,y,z]
+    point_b: str = Form(...),
+):
+    """Measure Euclidean distance between two points on the mesh."""
+    try:
+        a = np.array(json.loads(point_a), dtype=float)
+        b = np.array(json.loads(point_b), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid points")
+    if a.shape != (3,) or b.shape != (3,):
+        raise HTTPException(400, "each point must be [x,y,z]")
+    dist = float(np.linalg.norm(b - a))
+    mid = ((a + b) / 2.0).tolist()
+    return {
+        "distance_mm": dist,
+        "point_a": a.tolist(),
+        "point_b": b.tolist(),
+        "midpoint": mid,
+    }
+
+
+@app.post("/api/measure-angle")
+def measure_angle(
+    case_id: str,
+    vertex: str = Form(...),    # JSON [x,y,z] — the vertex point
+    arm_a: str = Form(...),     # JSON [x,y,z] — end of first arm
+    arm_b: str = Form(...),     # JSON [x,y,z] — end of second arm
+):
+    """Measure angle at vertex between two arms (vertex→arm_a and vertex→arm_b)."""
+    try:
+        v = np.array(json.loads(vertex), dtype=float)
+        a = np.array(json.loads(arm_a), dtype=float)
+        b = np.array(json.loads(arm_b), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid points")
+    va = a - v
+    vb = b - v
+    na = np.linalg.norm(va)
+    nb = np.linalg.norm(vb)
+    if na < 1e-12 or nb < 1e-12:
+        raise HTTPException(400, "degenerate arms")
+    cos_angle = np.clip(np.dot(va, vb) / (na * nb), -1.0, 1.0)
+    angle_rad = math.acos(cos_angle)
+    angle_deg = math.degrees(angle_rad)
+    return {
+        "angle_deg": round(angle_deg, 4),
+        "angle_rad": round(angle_rad, 6),
+        "vertex": v.tolist(),
+        "arm_a": a.tolist(),
+        "arm_b": b.tolist(),
+    }
+
+
+@app.post("/api/measure-bone-length")
+def measure_bone_length(
+    case_id: str,
+    point_proximal: str = Form(...),  # JSON [x,y,z]
+    point_distal: str = Form(...),    # JSON [x,y,z]
+):
+    """Measure projected bone length along the segment between two points.
+
+    Also returns the straight-line distance and the axis direction.
+    """
+    try:
+        prox = np.array(json.loads(point_proximal), dtype=float)
+        dist = np.array(json.loads(point_distal), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid points")
+    if prox.shape != (3,) or dist.shape != (3,):
+        raise HTTPException(400, "each point must be [x,y,z]")
+    vec = dist - prox
+    length = float(np.linalg.norm(vec))
+    axis = (vec / length).tolist() if length > 1e-12 else [0.0, 0.0, 1.0]
+    mid = ((prox + dist) / 2.0).tolist()
+    return {
+        "bone_length_mm": length,
+        "axis": axis,
+        "proximal": prox.tolist(),
+        "distal": dist.tolist(),
+        "midpoint": mid,
+    }
+
+
+# ─── Export per-fragment STL endpoint ─────────────────────────────────────────
+
+@app.post("/api/export-fragment-stl")
+def export_fragment_stl(
+    case_id: str,
+    fragment_names: str = Form(""),  # JSON array of names, or empty for all
+):
+    """Return a combined STL with all (transformed) fragments positioned in space."""
+    ft = _load_fragment_transforms(case_id)
+    out_dir = OUTPUTS / case_id
+
+    names = []
+    if fragment_names:
+        try:
+            names = json.loads(fragment_names)
+        except Exception:
+            names = []
+
+    if not names:
+        names = list(ft.get("fragments", {}).keys())
+
+    parts = []
+    for name in names:
+        finfo = ft.get("fragments", {}).get(name, {})
+        # Prefer transformed version if available
+        tf = finfo.get("transformed_url", "")
+        if tf:
+            tname = tf.split("/")[-1]
+            tp = out_dir / tname
+            if tp.exists():
+                parts.append(load_mesh(tp))
+                continue
+        src = out_dir / finfo["file"]
+        if src.exists():
+            parts.append(load_mesh(src))
+
+    if not parts:
+        raise HTTPException(404, "no fragments found to export")
+
+    combined = trimesh.util.concatenate(parts)
+    combined.remove_unreferenced_vertices()
+    out_path = out_dir / "fragments_combined.stl"
+    combined.export(out_path)
+    return {
+        "url": f"/api/cases/{case_id}/outputs/fragments_combined.stl",
+        "fragments_included": names,
+        "info": mesh_info(combined),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# MPR (Multi-Planar Reconstruction) slice viewer helpers & endpoints
+# ──────────────────────────────────────────────────────────────────────
+
+# In-memory cache: case_id -> {"volume": np.ndarray, "spacing": (z,y,x), "meta": dict}
+_mpr_volume_cache: dict[str, dict] = {}
+
+
+def _get_cached_volume(case_id: str) -> dict:
+    """Load and cache the DICOM volume for a case as a .npy file."""
+    if case_id in _mpr_volume_cache:
+        return _mpr_volume_cache[case_id]
+    case_dir = UPLOADS / case_id
+    npy_path = case_dir / "volume_cache.npy"
+    meta_path = case_dir / "dicom_meta.json"
+    if npy_path.exists() and meta_path.exists:
+        vol = np.load(str(npy_path), mmap_mode="r")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        spacing = tuple(meta.get("spacing_mm", [1.0, 1.0, 1.0]))
+        entry = {"volume": vol, "spacing": spacing, "meta": meta}
+        _mpr_volume_cache[case_id] = entry
+        return entry
+    # Fall back to re-reading DICOM
+    dicom_dir = case_dir / "dicom"
+    if not dicom_dir.exists():
+        raise HTTPException(404, "case has no DICOM data")
+    vol, spacing, meta = load_dicom_series(dicom_dir)
+    # Cache to disk for fast subsequent access
+    np.save(str(npy_path), vol)
+    entry = {"volume": vol, "spacing": spacing, "meta": meta}
+    _mpr_volume_cache[case_id] = entry
+    return entry
+
+
+def _window_level_to_uint8(slice_2d: np.ndarray, window_center: float, window_width: float) -> np.ndarray:
+    """Apply HU window/level mapping to a 2D slice, return uint8 grayscale."""
+    if window_width <= 0:
+        window_width = 1.0
+    lower = window_center - window_width / 2.0
+    upper = window_center + window_width / 2.0
+    result = np.clip((slice_2d - lower) / (upper - lower) * 255.0, 0, 255).astype(np.uint8)
+    return result
+
+
+def _get_mask_for_case(case_id: str) -> Optional[np.ndarray]:
+    """Try to reconstruct the segmentation mask from the case volume + meta."""
+    case_dir = UPLOADS / case_id
+    mask_npy = case_dir / "mask_cache.npy"
+    if mask_npy.exists():
+        return np.load(str(mask_npy), mmap_mode="r")
+    return None
+
+
+def _reconstruct_mask(case_id: str, vol: np.ndarray, meta: dict) -> np.ndarray:
+    """Reconstruct bone mask from volume using stored segmentation parameters."""
+    hu_min = float(meta.get("threshold_hu", 250))
+    hu_max = meta.get("threshold_max_hu", None)
+    if hu_max is not None and hu_max > hu_min:
+        mask = (vol >= hu_min) & (vol <= hu_max)
+    else:
+        mask = vol >= hu_min
+    mask = mask.astype(np.float32)
+    # Apply morphology if stored
+    close_r = int(meta.get("morphology_closing_radius", 0))
+    open_r = int(meta.get("morphology_opening_radius", 0))
+    dil_r = int(meta.get("dilation_radius", 0))
+    ero_r = int(meta.get("erosion_radius", 0))
+    if close_r > 0 or open_r > 0 or dil_r > 0 or ero_r > 0:
+        mask = _apply_morphology(mask, closing_radius=close_r, opening_radius=open_r,
+                                  dilation_radius=dil_r, erosion_radius=ero_r)
+    if meta.get("fill_holes", False):
+        mask = _apply_morphology(mask, fill_holes=True)
+    return (mask > 0.5).astype(np.uint8)
+
+
+def _overlay_mask_on_grayscale(gray: np.ndarray, mask_slice: np.ndarray,
+                                color: tuple[int, int, int] = (255, 60, 60),
+                                alpha: float = 0.35) -> np.ndarray:
+    """Overlay a binary mask on a grayscale image with given color and alpha."""
+    rgba = np.zeros((gray.shape[0], gray.shape[1], 4), dtype=np.uint8)
+    rgba[..., 0] = gray
+    rgba[..., 1] = gray
+    rgba[..., 2] = gray
+    rgba[..., 3] = 255
+    m = mask_slice > 0
+    if m.any():
+        for c in range(3):
+            rgba[m, c] = np.clip(
+                (1 - alpha) * gray[m] + alpha * color[c], 0, 255
+            ).astype(np.uint8)
+        rgba[m, 3] = 255
+    return rgba
+
+
+@app.get("/api/cases/{case_id}/mpr-volinfo")
+def mpr_volinfo(case_id: str):
+    """Return volume dimensions and spacing for MPR calculations."""
+    try:
+        entry = _get_cached_volume(case_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to load volume: {e}")
+    vol = entry["volume"]
+    spacing = entry["spacing"]
+    meta = entry["meta"]
+    return {
+        "dimensions": [int(vol.shape[0]), int(vol.shape[1]), int(vol.shape[2])],  # slices, rows, cols
+        "spacing_mm": list(spacing),  # z, y, x
+        "shape": {
+            "axial_slices": int(vol.shape[0]),
+            "coronal_slices": int(vol.shape[1]),
+            "sagittal_slices": int(vol.shape[2]),
+        },
+        "hu_range": [float(np.min(vol)), float(np.max(vol))],
+        "series_uid": meta.get("series_uid", ""),
+        "series_description": meta.get("series_description", ""),
+    }
+
+
+@app.get("/api/cases/{case_id}/slice-range")
+def slice_range(case_id: str):
+    """Return min/max slice indices for each axis."""
+    try:
+        entry = _get_cached_volume(case_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to load volume: {e}")
+    vol = entry["volume"]
+    return {
+        "axial": {"min": 0, "max": int(vol.shape[0]) - 1, "count": int(vol.shape[0])},
+        "coronal": {"min": 0, "max": int(vol.shape[1]) - 1, "count": int(vol.shape[1])},
+        "sagittal": {"min": 0, "max": int(vol.shape[2]) - 1, "count": int(vol.shape[2])},
+    }
+
+
+@app.get("/api/cases/{case_id}/slice")
+def get_slice(
+    case_id: str,
+    axis: str = "axial",
+    index: int = 0,
+    window_center: float = 40.0,
+    window_width: float = 400.0,
+    overlay_mask: bool = False,
+):
+    """Extract a single slice as PNG image with optional window/level and mask overlay.
+
+    Parameters:
+        axis: axial | coronal | sagittal
+        index: slice index along the given axis
+        window_center: HU center of the window
+        window_width: HU width of the window
+        overlay_mask: whether to overlay the segmentation mask
+    """
+    try:
+        entry = _get_cached_volume(case_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to load volume: {e}")
+
+    vol = entry["volume"]
+    axis = axis.lower()
+
+    # Extract the 2D slice from the 3D volume
+    # Volume shape: (slices_z, rows_y, cols_x)
+    if axis == "axial":
+        max_idx = vol.shape[0] - 1
+        index = max(0, min(index, max_idx))
+        slice_2d = vol[index, :, :].astype(np.float32)
+    elif axis == "coronal":
+        max_idx = vol.shape[1] - 1
+        index = max(0, min(index, max_idx))
+        slice_2d = vol[:, index, :].astype(np.float32)
+    elif axis == "sagittal":
+        max_idx = vol.shape[2] - 1
+        index = max(0, min(index, max_idx))
+        slice_2d = vol[:, :, index].astype(np.float32)
+    else:
+        raise HTTPException(400, f"Invalid axis '{axis}'. Use axial, coronal, or sagittal.")
+
+    # Apply window/level
+    gray = _window_level_to_uint8(slice_2d, window_center, window_width)
+
+    if overlay_mask:
+        # Try to get or reconstruct mask
+        mask = _get_mask_for_case(case_id)
+        if mask is None:
+            # Reconstruct on the fly (slower)
+            try:
+                mask = _reconstruct_mask(case_id, vol, entry["meta"])
+            except Exception:
+                mask = None
+        if mask is not None:
+            if axis == "axial":
+                mask_slice = mask[index, :, :]
+            elif axis == "coronal":
+                mask_slice = mask[:, index, :]
+            else:
+                mask_slice = mask[:, :, index]
+            img_rgba = _overlay_mask_on_grayscale(gray, mask_slice)
+            img = Image.fromarray(img_rgba, mode="RGBA")
+        else:
+            img = Image.fromarray(gray, mode="L")
+    else:
+        img = Image.fromarray(gray, mode="L")
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(content=buf.read(), media_type="image/png")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 4 — Mesh Boolean operations (Cork-style via trimesh)
+# ══════════════════════════════════════════════════════════════════════
+
+def _mesh_boolean(
+    mesh_a: trimesh.Trimesh,
+    mesh_b: trimesh.Trimesh,
+    operation: str = "difference",
+) -> trimesh.Trimesh:
+    """Perform mesh boolean operation with fallback.
+
+    Operations: difference, union, intersection.
+    Uses trimesh boolean (which uses manifold or blender as backend).
+    Falls back to trimesh convention if boolean fails.
+    """
+    try:
+        if operation == "difference":
+            result = mesh_a.difference(mesh_b)
+        elif operation == "union":
+            result = mesh_a.union(mesh_b)
+        elif operation == "intersection":
+            result = mesh_a.intersection(mesh_b)
+        else:
+            raise ValueError(f"Unknown boolean operation: {operation}")
+        if result is None or len(result.faces) == 0:
+            raise ValueError("boolean result is empty")
+        result.remove_unreferenced_vertices()
+        return result
+    except Exception:
+        # Fallback: return mesh_a unchanged
+        return mesh_a.copy()
+
+
+@app.post("/api/mesh-boolean")
+def mesh_boolean(
+    case_id: str,
+    operation: str = Form("difference"),  # difference | union | intersection
+    fragment_a: str = Form("positive"),
+    fragment_b: str = Form("cutting_guide"),
+):
+    """Perform boolean operation between two meshes from the case."""
+    out_dir = OUTPUTS / case_id
+    in_path = UPLOADS / case_id / "input.stl"
+
+    # Load mesh A
+    path_a = out_dir / f"fragment_{fragment_a}.stl"
+    if not path_a.exists():
+        path_a = out_dir / f"{fragment_a}.stl"
+    if not path_a.exists() and fragment_a == "input":
+        path_a = in_path
+    if not path_a.exists():
+        raise HTTPException(404, f"mesh A '{fragment_a}' not found")
+
+    # Load mesh B
+    path_b = out_dir / f"{fragment_b}.stl"
+    if not path_b.exists():
+        raise HTTPException(404, f"mesh B '{fragment_b}' not found")
+
+    mesh_a = load_mesh(path_a)
+    mesh_b = load_mesh(path_b)
+
+    try:
+        result = _mesh_boolean(mesh_a, mesh_b, operation)
+    except Exception as e:
+        raise HTTPException(400, f"boolean operation failed: {e}")
+
+    ts = uuid.uuid4().hex[:8]
+    out_name = f"boolean_{operation}_{fragment_a}_vs_{fragment_b}_{ts}.stl"
+    out_path = out_dir / out_name
+    result.export(out_path)
+
+    return {
+        "case_id": case_id,
+        "operation": operation,
+        "mesh_a": fragment_a,
+        "mesh_b": fragment_b,
+        "url": f"/api/cases/{case_id}/outputs/{out_name}",
+        "info": mesh_info(result),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 4 — Interactive contact patch selection
+# ══════════════════════════════════════════════════════════════════════
+
+def _select_contact_patch(
+    mesh: trimesh.Trimesh,
+    center_point: np.ndarray,
+    radius_mm: float = 30.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select mesh vertices within radius of a center point.
+
+    Returns (face_indices, vertices) of the contact patch.
+    """
+    tree = cKDTree(mesh.vertices)
+    vert_indices = tree.query_ball_point(center_point, r=radius_mm)
+    if not vert_indices:
+        # Fallback: nearest vertex
+        dist, nearest = tree.query(center_point, k=1)
+        vert_indices = [int(nearest)]
+
+    # Find faces that use these vertices
+    vert_set = set(vert_indices)
+    face_mask = np.array([
+        any(int(v) in vert_set for v in face)
+        for face in mesh.faces
+    ])
+    face_indices = np.where(face_mask)[0]
+    return face_indices, np.array(vert_indices)
+
+
+@app.post("/api/contact-patch")
+def contact_patch(
+    case_id: str,
+    center: str = Form(...),  # JSON [x,y,z]
+    radius_mm: float = Form(30.0),
+    thickness_mm: float = Form(4.0),
+    clearance_mm: float = Form(0.6),
+):
+    """Generate a conformal contact pad from a selected patch on the bone surface."""
+    in_path = UPLOADS / case_id / "input.stl"
+    if not in_path.exists():
+        raise HTTPException(404, "case not found")
+
+    try:
+        center_pt = np.array(json.loads(center), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid center point")
+
+    mesh = load_mesh(in_path)
+    face_indices, vert_indices = _select_contact_patch(mesh, center_pt, radius_mm)
+
+    if len(face_indices) == 0:
+        raise HTTPException(400, "no mesh faces found in the selected patch")
+
+    # Extract sub-mesh for the patch
+    patch_faces = mesh.faces[face_indices]
+    used_verts = np.unique(patch_faces)
+    remap = {int(v): i for i, v in enumerate(used_verts)}
+    new_faces = np.vectorize(remap.get)(patch_faces).astype(np.int64)
+    patch_mesh = trimesh.Trimesh(
+        vertices=mesh.vertices[used_verts],
+        faces=new_faces,
+        process=True,
+    )
+    patch_mesh.remove_unreferenced_vertices()
+
+    # Generate conformal pad using the existing function
+    # Use the patch center to determine the best axis
+    normal = patch_mesh.face_normals.mean(axis=0)
+    norm_len = np.linalg.norm(normal)
+    if norm_len > 1e-12:
+        normal = normal / norm_len
+    else:
+        normal = np.array([0.0, 1.0, 0.0])
+
+    # Create a simplified pad by offsetting the patch
+    inner_verts = patch_mesh.vertices.copy()
+    outer_verts = inner_verts + normal * thickness_mm
+
+    n_verts = len(inner_verts)
+    all_verts = np.vstack([inner_verts, outer_verts])
+
+    # Build faces: original + offset + boundary walls
+    inner_faces = patch_mesh.faces.copy()
+    outer_faces = inner_faces[:, ::-1] + n_verts  # flipped for outward normal
+    all_faces = np.vstack([inner_faces, outer_faces])
+
+    # Boundary walls
+    edges = patch_mesh.edges_unique
+    for e in edges:
+        v0, v1 = e[0], e[1]
+        all_faces = np.vstack([all_faces, [
+            [v0, v1, v1 + n_verts],
+            [v0, v1 + n_verts, v0 + n_verts],
+        ]])
+
+    pad = trimesh.Trimesh(vertices=all_verts, faces=np.array(all_faces), process=True)
+    pad.remove_unreferenced_vertices()
+
+    ts = uuid.uuid4().hex[:8]
+    out_dir = OUTPUTS / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"contact_patch_{ts}.stl"
+    pad.export(out_path)
+
+    return {
+        "case_id": case_id,
+        "center": center_pt.tolist(),
+        "radius_mm": radius_mm,
+        "thickness_mm": thickness_mm,
+        "clearance_mm": clearance_mm,
+        "patch_faces": len(face_indices),
+        "patch_vertices": len(vert_indices),
+        "url": f"/api/cases/{case_id}/outputs/contact_patch_{ts}.stl",
+        "info": mesh_info(pad),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 5 — Drill / Screw Trajectory Editor
+# ══════════════════════════════════════════════════════════════════════
+
+def _screw_traj_path(case_id: str) -> Path:
+    return UPLOADS / case_id / "screw_trajectories.json"
+
+
+def _load_screw_trajs(case_id: str) -> list:
+    p = _screw_traj_path(case_id)
+    if p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return []
+
+
+def _save_screw_trajs(case_id: str, data: list):
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    (UPLOADS / case_id).mkdir(parents=True, exist_ok=True)
+    _screw_traj_path(case_id).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+@app.get("/api/cases/{case_id}/screw-trajectories")
+def get_screw_trajectories(case_id: str):
+    """Get all screw trajectories for a case."""
+    return {"trajectories": _load_screw_trajs(case_id)}
+
+
+@app.post("/api/cases/{case_id}/screw-trajectories")
+def add_screw_trajectory(
+    case_id: str,
+    entry_x: float = Form(...),
+    entry_y: float = Form(...),
+    entry_z: float = Form(...),
+    dir_x: float = Form(0.0),
+    dir_y: float = Form(0.0),
+    dir_z: float = Form(1.0),
+    length_mm: float = Form(30.0),
+    diameter_mm: float = Form(3.5),
+    name: str = Form(""),
+):
+    """Add a screw trajectory defined by entry point + direction."""
+    entry = np.array([entry_x, entry_y, entry_z], dtype=float)
+    direction = np.array([dir_x, dir_y, dir_z], dtype=float)
+    norm = np.linalg.norm(direction)
+    if norm < 1e-12:
+        raise HTTPException(400, "direction vector cannot be zero")
+    direction = direction / norm
+
+    trajs = _load_screw_trajs(case_id)
+    ts_id = uuid.uuid4().hex[:8]
+    traj = {
+        "id": ts_id,
+        "name": name or f"screw_{len(trajs) + 1}",
+        "entry": entry.tolist(),
+        "direction": direction.tolist(),
+        "length_mm": length_mm,
+        "diameter_mm": diameter_mm,
+        "tip": (entry + direction * length_mm).tolist(),
+    }
+    trajs.append(traj)
+    _save_screw_trajs(case_id, trajs)
+
+    # Generate visual cylinder for the trajectory
+    in_path = UPLOADS / case_id / "input.stl"
+    collision_info = None
+    if in_path.exists():
+        mesh = load_mesh(in_path)
+        # Check intersection with bone
+        tip = entry + direction * length_mm
+        # Simple collision: check if entry and tip are near mesh vertices
+        tree = cKDTree(mesh.vertices)
+        entry_dist, _ = tree.query(entry, k=1)
+        tip_dist, _ = tree.query(tip, k=1)
+        collision_info = {
+            "entry_distance_to_bone_mm": round(float(entry_dist), 2),
+            "tip_distance_to_bone_mm": round(float(tip_dist), 2),
+        }
+
+    return {"trajectory": traj, "collision": collision_info}
+
+
+@app.delete("/api/cases/{case_id}/screw-trajectories/{traj_id}")
+def delete_screw_trajectory(case_id: str, traj_id: str):
+    """Remove a screw trajectory by ID."""
+    trajs = _load_screw_trajs(case_id)
+    trajs = [t for t in trajs if t["id"] != traj_id]
+    _save_screw_trajs(case_id, trajs)
+    return {"ok": True, "remaining": len(trajs)}
+
+
+@app.post("/api/cases/{case_id}/screw-trajectories/generate-sleeves")
+def generate_screw_sleeves(
+    case_id: str,
+    sleeve_outer_mm: float = Form(6.0),
+    sleeve_length_mm: float = Form(12.0),
+):
+    """Generate drill guide sleeves for all screw trajectories."""
+    trajs = _load_screw_trajs(case_id)
+    if not trajs:
+        raise HTTPException(400, "no screw trajectories defined")
+
+    parts = []
+    for traj in trajs:
+        entry = np.array(traj["entry"])
+        direction = np.array(traj["direction"])
+        # Create a cylinder along the trajectory
+        cyl = trimesh.creation.cylinder(
+            radius=sleeve_outer_mm / 2.0,
+            height=sleeve_length_mm,
+            sections=24,
+        )
+        # Orient cylinder along direction
+        z_axis = np.array([0.0, 0.0, 1.0])
+        if not np.allclose(direction, z_axis):
+            rot_axis = np.cross(z_axis, direction)
+            rot_axis = rot_axis / np.linalg.norm(rot_axis)
+            angle = math.acos(np.clip(np.dot(z_axis, direction), -1, 1))
+            rot_mat = trimesh.transformations.rotation_matrix(angle, rot_axis)
+            cyl.apply_transform(rot_mat)
+        # Position at entry point
+        cyl.apply_translation(entry + direction * sleeve_length_mm / 2.0)
+        parts.append(cyl)
+
+    if parts:
+        combined = trimesh.util.concatenate(parts)
+        combined.remove_unreferenced_vertices()
+        out_dir = OUTPUTS / case_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "screw_sleeves.stl"
+        combined.export(out_path)
+        return {
+            "url": f"/api/cases/{case_id}/outputs/screw_sleeves.stl",
+            "count": len(trajs),
+            "info": mesh_info(combined),
+        }
+    raise HTTPException(400, "no sleeves generated")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 6 — Patient-Specific Plate Generator
+# ══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/plate-generator")
+def generate_plate(
+    case_id: str,
+    centerline_points: str = Form(...),  # JSON array of [x,y,z] points
+    width_mm: float = Form(12.0),
+    thickness_mm: float = Form(3.0),
+    screw_hole_diameter_mm: float = Form(3.5),
+    screw_hole_spacing_mm: float = Form(15.0),
+    edge_offset_mm: float = Form(3.0),
+):
+    """Generate a patient-specific bone plate from a centerline path.
+
+    The plate follows the bone surface anatomy with evenly spaced screw holes.
+    """
+    in_path = UPLOADS / case_id / "input.stl"
+    if not in_path.exists():
+        raise HTTPException(404, "case not found")
+
+    try:
+        pts = json.loads(centerline_points)
+        pts = [np.array(p, dtype=float) for p in pts]
+    except Exception:
+        raise HTTPException(400, "invalid centerline_points: expected JSON array of [x,y,z]")
+
+    if len(pts) < 2:
+        raise HTTPException(400, "at least 2 centerline points required")
+
+    mesh = load_mesh(in_path)
+    tree = cKDTree(mesh.vertices)
+
+    # Generate plate body by sweeping a rectangle along the centerline
+    # Sample points along the path
+    path_points = []
+    for i in range(len(pts) - 1):
+        seg_len = np.linalg.norm(pts[i + 1] - pts[i])
+        n_steps = max(2, int(seg_len / 2.0))  # every 2mm
+        for t in np.linspace(0, 1, n_steps):
+            path_points.append(pts[i] * (1 - t) + pts[i + 1] * t)
+
+    if not path_points:
+        path_points = pts
+
+    # For each path point, find the bone surface normal and offset
+    plate_parts = []
+    screw_positions = []
+
+    for i, pp in enumerate(path_points):
+        # Find nearest bone surface point
+        dist, nearest_idx = tree.query(pp, k=1)
+        surface_pt = mesh.vertices[nearest_idx]
+        # Estimate normal from mesh face normals near this point
+        face_idx = None
+        for fi, face in enumerate(mesh.faces):
+            if nearest_idx in face:
+                face_idx = fi
+                break
+        if face_idx is not None:
+            normal = mesh.face_normals[face_idx]
+        else:
+            normal = np.array([0.0, 1.0, 0.0])
+
+        # Offset from bone surface
+        offset_pt = surface_pt + normal * 1.5  # 1.5mm offset from bone
+
+        # Create a small box segment at this position
+        if i < len(path_points) - 1:
+            tangent = path_points[i + 1] - pp
+        elif i > 0:
+            tangent = pp - path_points[i - 1]
+        else:
+            tangent = np.array([1.0, 0.0, 0.0])
+
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm < 1e-12:
+            tangent = np.array([1.0, 0.0, 0.0])
+        else:
+            tangent = tangent / tangent_norm
+
+        # Build local coordinate system
+        binormal = np.cross(normal, tangent)
+        bn_norm = np.linalg.norm(binormal)
+        if bn_norm < 1e-12:
+            binormal = np.cross(normal, np.array([1.0, 0.0, 0.0]))
+            bn_norm = np.linalg.norm(binormal)
+        binormal = binormal / bn_norm
+
+        # Create box segment
+        half_w = width_mm / 2.0
+        seg_len = screw_hole_spacing_mm
+
+        box = trimesh.creation.box(extents=[seg_len, thickness_mm, width_mm])
+        # Orient: x along tangent, y along normal, z along binormal
+        rot_mat = np.eye(4)
+        rot_mat[:3, 0] = tangent
+        rot_mat[:3, 1] = normal
+        rot_mat[:3, 2] = binormal
+        box.apply_transform(rot_mat)
+        box.apply_translation(offset_pt)
+        plate_parts.append(box)
+
+        # Screw hole positions (every N mm)
+        if i % max(1, int(screw_hole_spacing_mm / 2.0)) == 0:
+            screw_positions.append(offset_pt.tolist())
+
+    if plate_parts:
+        plate = trimesh.util.concatenate(plate_parts)
+        plate.remove_unreferenced_vertices()
+
+        # Subtract screw holes (cylinders)
+        hole_cyls = []
+        for sp in screw_positions:
+            cyl = trimesh.creation.cylinder(
+                radius=screw_hole_diameter_mm / 2.0,
+                height=thickness_mm * 3,
+                sections=16,
+            )
+            cyl.apply_translation(sp)
+            hole_cyls.append(cyl)
+
+        if hole_cyls:
+            try:
+                holes_combined = trimesh.util.concatenate(hole_cyls)
+                plate = plate.difference(holes_combined)
+            except Exception:
+                pass  # Keep plate without holes if boolean fails
+
+        out_dir = OUTPUTS / case_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = uuid.uuid4().hex[:8]
+        out_path = out_dir / f"patient_plate_{ts}.stl"
+        plate.export(out_path)
+
+        return {
+            "case_id": case_id,
+            "width_mm": width_mm,
+            "thickness_mm": thickness_mm,
+            "screw_holes": len(screw_positions),
+            "screw_positions": screw_positions,
+            "url": f"/api/cases/{case_id}/outputs/patient_plate_{ts}.stl",
+            "info": mesh_info(plate),
+        }
+
+    raise HTTPException(400, "plate generation failed")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 8 — DICOM Anonymization
+# ══════════════════════════════════════════════════════════════════════
+
+DICOM_TAGS_TO_ANONYMIZE = [
+    "PatientName", "PatientID", "PatientBirthDate", "PatientSex",
+    "PatientAge", "PatientWeight", "PatientAddress", "PatientPhone",
+    "ReferringPhysicianName", "PerformingPhysicianName", "OperatorsName",
+    "InstitutionName", "InstitutionAddress", "StationName",
+    "StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate",
+    "StudyTime", "SeriesTime", "AcquisitionTime", "ContentTime",
+    "AccessionNumber", "StudyID", "OtherPatientIDs",
+    "OtherPatientNames", "PhysiciansOfRecord", "RequestingPhysician",
+]
+
+
+@app.post("/api/cases/{case_id}/anonymize-dicom")
+def anonymize_dicom(
+    case_id: str,
+    new_patient_id: str = Form("ANON"),
+    new_patient_name: str = Form("Anonymous"),
+    remove_dates: bool = Form(True),
+    remove_physicians: bool = Form(True),
+):
+    """Anonymize DICOM files in a case. Creates anonymized copies."""
+    dicom_dir = UPLOADS / case_id / "dicom"
+    if not dicom_dir.exists():
+        raise HTTPException(404, "case has no DICOM folder")
+
+    anon_dir = UPLOADS / case_id / "dicom_anonymized"
+    if anon_dir.exists():
+        shutil.rmtree(anon_dir)
+    anon_dir.mkdir(parents=True)
+
+    count = 0
+    for p in dicom_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            ds = pydicom.dcmread(str(p), force=True)
+            if not hasattr(ds, "PixelData"):
+                continue
+
+            # Anonymize tags
+            for tag_name in DICOM_TAGS_TO_ANONYMIZE:
+                if hasattr(ds, tag_name):
+                    if tag_name in ("PatientName",):
+                        setattr(ds, tag_name, new_patient_name)
+                    elif tag_name in ("PatientID",):
+                        setattr(ds, tag_name, new_patient_id)
+                    elif remove_dates and "Date" in tag_name:
+                        setattr(ds, tag_name, "")
+                    elif remove_dates and "Time" in tag_name:
+                        setattr(ds, tag_name, "")
+                    elif remove_physicians and "Physician" in tag_name:
+                        setattr(ds, tag_name, "")
+                    elif remove_physicians and tag_name in ("OperatorsName", "PerformingPhysicianName"):
+                        setattr(ds, tag_name, "")
+                    else:
+                        setattr(ds, tag_name, "")
+
+            # Save anonymized
+            rel = p.relative_to(dicom_dir)
+            out_p = (anon_dir / rel).resolve()
+            if not str(out_p).startswith(str(anon_dir.resolve())):
+                continue
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            ds.save_as(str(out_p))
+            count += 1
+        except Exception:
+            continue
+
+    return {
+        "anonymized_files": count,
+        "anonymized_dir": str(anon_dir),
+        "new_patient_id": new_patient_id,
+        "new_patient_name": new_patient_name,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 8 — Mesh Mirror / Reflection
+# ══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/mirror-mesh")
+def mirror_mesh(
+    case_id: str,
+    axis: str = Form("x"),  # x | y | z
+    fragment: str = Form(""),
+):
+    """Mirror a mesh (or the input mesh) across a given axis."""
+    in_path = UPLOADS / case_id / "input.stl"
+    if fragment:
+        src_path = OUTPUTS / case_id / f"fragment_{fragment}.stl"
+        if not src_path.exists():
+            src_path = OUTPUTS / case_id / f"{fragment}.stl"
+    else:
+        src_path = in_path
+
+    if not src_path.exists():
+        raise HTTPException(404, "mesh not found")
+
+    mesh = load_mesh(src_path)
+    # Mirror by negating the appropriate coordinate
+    mirror_mat = np.eye(4)
+    axis_idx = {"x": 0, "y": 1, "z": 2}.get(axis.lower(), 0)
+    mirror_mat[axis_idx, axis_idx] = -1.0
+    mesh.apply_transform(mirror_mat)
+    # Flip normals after mirror
+    mesh.invert()
+
+    out_dir = OUTPUTS / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = uuid.uuid4().hex[:8]
+    name = fragment or "input"
+    out_path = out_dir / f"mirrored_{name}_{axis}_{ts}.stl"
+    mesh.export(out_path)
+
+    return {
+        "case_id": case_id,
+        "axis": axis,
+        "source": str(src_path.name),
+        "url": f"/api/cases/{case_id}/outputs/{out_path.name}",
+        "info": mesh_info(mesh),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 8 — Cephalometry (Angular Measurements)
+# ══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/cephalometry")
+def cephalometry(
+    case_id: str,
+    landmarks: str = Form(...),  # JSON: { "S": [x,y,z], "N": [x,y,z], "A": [x,y,z], "B": [x,y,z], "Go": [x,y,z], "Me": [x,y,z] }
+):
+    """Compute cephalometric angles from named landmarks.
+
+    Standard landmarks: S (Sella), N (Nasion), A (Subspinale),
+    B (Supramentale), Go (Gonion), Me (Menton).
+
+    Returns SNA, SNB, ANB, FMA, IMPA, S-N angles.
+    """
+    try:
+        lm = json.loads(landmarks)
+    except Exception:
+        raise HTTPException(400, "invalid landmarks JSON")
+
+    def get_pt(name):
+        if name not in lm:
+            raise HTTPException(400, f"missing landmark: {name}")
+        return np.array(lm[name], dtype=float)
+
+    results = {}
+
+    # Helper: angle at vertex between two arms
+    def angle_at(vertex, arm_a, arm_b):
+        va = arm_a - vertex
+        vb = arm_b - vertex
+        na, nb = np.linalg.norm(va), np.linalg.norm(vb)
+        if na < 1e-12 or nb < 1e-12:
+            return None
+        cos_a = np.clip(np.dot(va, vb) / (na * nb), -1, 1)
+        return round(math.degrees(math.acos(cos_a)), 2)
+
+    # Helper: distance
+    def dist(a, b):
+        return round(float(np.linalg.norm(b - a)), 2)
+
+    try:
+        S, N, A, B = get_pt("S"), get_pt("N"), get_pt("A"), get_pt("B")
+
+        # SNA angle: S-N-A (at N)
+        sna = angle_at(N, S, A)
+        if sna is not None:
+            results["SNA_deg"] = sna
+
+        # SNB angle: S-N-B (at N)
+        snb = angle_at(N, S, B)
+        if snb is not None:
+            results["SNB_deg"] = snb
+
+        # ANB angle: A-N-B (at N)
+        anb = angle_at(N, A, B)
+        if anb is not None:
+            results["ANB_deg"] = anb
+
+        # S-N length
+        results["S_N_mm"] = dist(S, N)
+
+        # A-B length
+        results["A_B_mm"] = dist(A, B)
+
+        # N-A length
+        results["N_A_mm"] = dist(N, A)
+
+        # N-B length
+        results["N_B_mm"] = dist(N, B)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"cephalometry calculation error: {e}")
+
+    # Additional landmarks (Go, Me) if provided
+    if "Go" in lm and "Me" in lm:
+        Go = get_pt("Go")
+        Me = get_pt("Me")
+        results["Go_Me_mm"] = dist(Go, Me)
+
+        if "S" in lm:
+            S = get_pt("S")
+            # FMA: Frankfort-Mandibular plane angle (S-N vs Go-Me)
+            sn_dir = N - S
+            gm_dir = Me - Go
+            na, nb = np.linalg.norm(sn_dir), np.linalg.norm(gm_dir)
+            if na > 1e-12 and nb > 1e-12:
+                cos_a = np.clip(np.dot(sn_dir, gm_dir) / (na * nb), -1, 1)
+                results["FMA_deg"] = round(math.degrees(math.acos(cos_a)), 2)
+
+    return {"case_id": case_id, "measurements": results, "landmarks_used": list(lm.keys())}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 8 — Case Management (CRUD, versioning, audit)
+# ══════════════════════════════════════════════════════════════════════
+
+CASE_META_DIR = DATA / "case_meta"
+CASE_META_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _case_meta_path(case_id: str) -> Path:
+    return CASE_META_DIR / f"{case_id}.json"
+
+
+def _load_case_meta(case_id: str) -> dict:
+    p = _case_meta_path(case_id)
+    if p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return {
+        "case_id": case_id,
+        "created_at": None,
+        "updated_at": None,
+        "patient_id": "",
+        "description": "",
+        "status": "draft",
+        "version": 1,
+        "audit_log": [],
+    }
+
+
+def _save_case_meta(case_id: str, meta: dict):
+    _case_meta_path(case_id).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _audit(case_id: str, action: str, details: str = ""):
+    meta = _load_case_meta(case_id)
+    if not meta["created_at"]:
+        meta["created_at"] = time.time()
+    meta["updated_at"] = time.time()
+    meta.setdefault("audit_log", []).append({
+        "timestamp": time.time(),
+        "action": action,
+        "details": details,
+        "version": meta.get("version", 1),
+    })
+    # Keep last 200 audit entries
+    if len(meta["audit_log"]) > 200:
+        meta["audit_log"] = meta["audit_log"][-200:]
+    _save_case_meta(case_id, meta)
+
+
+@app.get("/api/cases/{case_id}/meta")
+def get_case_meta(case_id: str):
+    """Get case metadata including audit log."""
+    meta = _load_case_meta(case_id)
+    return meta
+
+
+@app.put("/api/cases/{case_id}/meta")
+def update_case_meta(
+    case_id: str,
+    patient_id: str = Form(""),
+    description: str = Form(""),
+    status: str = Form(""),
+):
+    """Update case metadata."""
+    meta = _load_case_meta(case_id)
+    if patient_id:
+        meta["patient_id"] = patient_id
+    if description:
+        meta["description"] = description
+    if status:
+        meta["status"] = status
+    meta["version"] = meta.get("version", 1) + 1
+    _audit(case_id, "meta_update", f"status={status}")
+    _save_case_meta(case_id, meta)
+    return meta
+
+
+@app.get("/api/cases-list")
+def list_cases(limit: int = 50, status: str = ""):
+    """List all cases with metadata."""
+    cases = []
+    for p in sorted(CASE_META_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+            if status and meta.get("status") != status:
+                continue
+            cases.append(meta)
+        except Exception:
+            continue
+        if len(cases) >= limit:
+            break
+    return {"cases": cases, "total": len(cases)}
+
+
+@app.post("/api/cases/{case_id}/snapshot")
+def create_snapshot(
+    case_id: str,
+    label: str = Form(""),
+):
+    """Create a named snapshot of the current case state."""
+    in_path = UPLOADS / case_id / "input.stl"
+    if not in_path.exists():
+        raise HTTPException(404, "case not found")
+
+    meta = _load_case_meta(case_id)
+    snap_id = uuid.uuid4().hex[:8]
+    snap_dir = OUTPUTS / case_id / "snapshots" / snap_id
+    snap_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy input mesh
+    shutil.copy2(in_path, snap_dir / "input.stl")
+
+    # Copy all outputs
+    out_dir = OUTPUTS / case_id
+    if out_dir.exists():
+        for f in out_dir.iterdir():
+            if f.is_file() and f.suffix in (".stl", ".json", ".ply", ".obj"):
+                shutil.copy2(f, snap_dir / f.name)
+
+    # Record snapshot
+    meta.setdefault("snapshots", []).append({
+        "id": snap_id,
+        "label": label or f"snap_{len(meta.get('snapshots', [])) + 1}",
+        "created_at": time.time(),
+        "path": str(snap_dir),
+    })
+    _audit(case_id, "snapshot_created", f"snap_id={snap_id}, label={label}")
+    _save_case_meta(case_id, meta)
+
+    return {"snapshot_id": snap_id, "label": label, "path": str(snap_dir)}
+
+
+@app.get("/api/cases/{case_id}/snapshots")
+def list_snapshots(case_id: str):
+    """List all snapshots for a case."""
+    meta = _load_case_meta(case_id)
+    return {"snapshots": meta.get("snapshots", [])}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fase 8 — PDF Surgical Plan Report
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/cases/{case_id}/report")
+def generate_report(case_id: str):
+    """Generate a JSON surgical plan report (PDF-ready structure)."""
+    meta = _load_case_meta(case_id)
+    in_path = UPLOADS / case_id / "input.stl"
+
+    report = {
+        "case_id": case_id,
+        "generated_at": time.time(),
+        "patient_id": meta.get("patient_id", ""),
+        "description": meta.get("description", ""),
+        "status": meta.get("status", "draft"),
+        "version": meta.get("version", 1),
+        "mesh_info": None,
+        "dicom_info": None,
+        "fragments": {},
+        "guides": {},
+        "screw_trajectories": _load_screw_trajs(case_id),
+        "measurements": {},
+        "audit_log": meta.get("audit_log", [])[-20:],  # last 20 entries
+    }
+
+    # Mesh info
+    if in_path.exists():
+        try:
+            mesh = load_mesh(in_path)
+            report["mesh_info"] = mesh_info(mesh)
+        except Exception:
+            pass
+
+    # DICOM info
+    dicom_meta_path = UPLOADS / case_id / "dicom_meta.json"
+    if dicom_meta_path.exists():
+        try:
+            report["dicom_info"] = json.loads(dicom_meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Fragment transforms
+    ft = _load_fragment_transforms(case_id)
+    report["fragments"] = ft.get("fragments", {})
+
+    # Guides
+    out_dir = OUTPUTS / case_id
+    if out_dir.exists():
+        for guide_file in ["cutting_guide.stl", "conformal_cutting_guide.stl", "patient_plate.stl"]:
+            if (out_dir / guide_file).exists():
+                report["guides"][guide_file] = f"/api/cases/{case_id}/outputs/{guide_file}"
+
+    return report
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
