@@ -119,6 +119,7 @@ canvas{display:block}
       </div>
       <div class="tool-group">
         <div class="tool-btn" onclick="executeSlice()" style="background:#2a3a2a;color:#6f6">✂️ Slice</div>
+        <div class="tool-btn" onclick="cutWithPlane()" style="background:#2a3a5a;color:#6af">🦴 Cut with Plane</div>
         <div class="tool-btn" onclick="clearShape()">🗑 Clear</div>
       </div>
     </div>
@@ -1103,6 +1104,52 @@ function rotateShape(deg,axis){
   }
 }
 
+// ============ CUT WITH OSTEOTOMY PLANE ============
+window.cutWithPlane=function(){
+  if(selectedIdx<0){setStatus('Select a bone first');return;}
+
+  // Find the selected osteotomy plane in objects
+  const obj=objects[selectedIdx];
+  let planeObj=null;
+
+  // Check if selected object is a plane
+  if(obj.type==='plane'){
+    planeObj=obj;
+  } else {
+    // Look for any plane in objects
+    planeObj=objects.find(o=>o.type==='plane');
+  }
+
+  if(!planeObj){
+    setStatus('No osteotomy plane found. Create one first (✂️ Osteotomy Plane)');
+    return;
+  }
+
+  // Get plane position and normal
+  const planeMesh=planeObj.mesh;
+  const origin=planeMesh.position.clone();
+
+  // Plane normal is the local Y axis (up) transformed by the plane's rotation
+  const normal=new THREE.Vector3(0,1,0);
+  normal.applyQuaternion(planeMesh.quaternion).normalize();
+
+  // Set the shape origin and normal for executeSlice
+  shapeOrigin=origin;
+  shapeNormal=normal;
+  activeShape=planeMesh;
+
+  setStatus(`✂️ Cutting with osteotomy plane at (${origin.x.toFixed(1)}, ${origin.y.toFixed(1)}, ${origin.z.toFixed(1)})`);
+
+  // Now select the bone to cut (not the plane)
+  const boneIdx=objects.findIndex(o=>o!==planeObj && !o.transparent);
+  if(boneIdx>=0 && boneIdx!==selectedIdx){
+    selectObject(boneIdx);
+  }
+
+  // Execute the slice
+  executeSlice();
+};
+
 // ============ EXECUTE SLICE ============
 window.executeSlice=async function(){
   if(!activeShape||!shapeOrigin||!shapeNormal){
@@ -1828,7 +1875,7 @@ function setCORA(point){
   setStatus(`📍 CORA placed at (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)})`);
 }
 
-// Rotate selected bone around CORA
+// Rotate selected bone around CORA (single clean implementation)
 window.rotateAroundCORA=function(deg,reset){
   if(selectedIdx<0){setStatus('Select a bone first');return;}
   if(!coraPoint){setStatus('Place CORA first (click 📍 Place CORA)');return;}
@@ -1837,10 +1884,11 @@ window.rotateAroundCORA=function(deg,reset){
   const mesh=obj.mesh;
 
   if(reset){
-    // Reset to original position
     if(obj._coraOriginal){
+      _captureUndoState('CORA Reset');
       mesh.position.copy(obj._coraOriginal.pos);
       mesh.rotation.copy(obj._coraOriginal.rot);
+      gizmo.attach(mesh);
     }
     setStatus('⟲ Reset to original position');
     return;
@@ -1851,50 +1899,49 @@ window.rotateAroundCORA=function(deg,reset){
     obj._coraOriginal={pos:mesh.position.clone(),rot:mesh.rotation.clone()};
   }
 
+  _captureUndoState('CORA Rotation');
+
   // Use custom angle if provided
   const angleInput=document.getElementById('cora-angle');
-  if(angleInput && deg!==0){
+  if(angleInput&&deg!==0){
     deg=parseFloat(angleInput.value)||deg;
     if(deg<0)deg=-Math.abs(deg);
     else deg=Math.abs(deg);
   }
 
-  // Determine rotation axis
-  const axisSelect=document.getElementById('cora-axis');
+  // Use ACA direction if set, otherwise fall back to axis selector
   let rotAxis;
-  if(axisSelect){
-    switch(axisSelect.value){
-      case 'x': rotAxis=new THREE.Vector3(1,0,0);break;
-      case 'y': rotAxis=new THREE.Vector3(0,1,0);break;
-      case 'z': rotAxis=new THREE.Vector3(0,0,1);break;
-      default: rotAxis=new THREE.Vector3(0,0,1);break;
-    }
+  if(acaDirection){
+    rotAxis=acaDirection.clone();
   } else {
-    rotAxis=new THREE.Vector3(0,0,1);
+    const axisSelect=document.getElementById('cora-axis');
+    if(axisSelect){
+      switch(axisSelect.value){
+        case 'x': rotAxis=new THREE.Vector3(1,0,0);break;
+        case 'y': rotAxis=new THREE.Vector3(0,1,0);break;
+        case 'z': rotAxis=new THREE.Vector3(0,0,1);break;
+        default: rotAxis=new THREE.Vector3(0,0,1);
+      }
+    } else {
+      rotAxis=new THREE.Vector3(0,0,1);
+    }
   }
 
   // CORA rotation: translate to CORA, rotate, translate back
   const rad=THREE.MathUtils.degToRad(deg);
-
-  // Get current position relative to CORA
   const relPos=mesh.position.clone().sub(coraPoint);
-
-  // Rotate the relative position around the axis
   relPos.applyAxisAngle(rotAxis,rad);
-
-  // Set new position
   mesh.position.copy(coraPoint.clone().add(relPos));
-
-  // Also rotate the mesh itself
   mesh.rotateOnWorldAxis(rotAxis,rad);
-
-  // Update gizmo
   gizmo.attach(mesh);
 
-  // Update status
-  const totalDeg=deg;
-  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — rotated ${totalDeg.toFixed(1)}°`;
-  setStatus(`↻ Rotated ${totalDeg.toFixed(1)}° around CORA`);
+  // Update total rotation tracking
+  if(!obj._totalCoraRotation)obj._totalCoraRotation=0;
+  obj._totalCoraRotation+=deg;
+
+  const axisLabel=acaDirection?'ACA':document.getElementById('cora-axis')?.value||'Z';
+  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — ${obj._totalCoraRotation.toFixed(1)}° total around ${axisLabel}`;
+  setStatus(`↻ Rotated ${deg.toFixed(1)}° around ${axisLabel} at CORA (total: ${obj._totalCoraRotation.toFixed(1)}°)`);
 };
 
 // Draw anatomical axis
@@ -2259,65 +2306,6 @@ function setACA(direction){
   document.getElementById('cora-status').style.color='#ff00ff';
   setStatus(`🔄 ACA set at CORA — direction (${acaDirection.x.toFixed(2)}, ${acaDirection.y.toFixed(2)}, ${acaDirection.z.toFixed(2)})`);
 }
-
-// Override rotateAroundCORA to use ACA if set
-const _origRotateAroundCORA=window.rotateAroundCORA;
-window.rotateAroundCORA=function(deg,reset){
-  if(selectedIdx<0){setStatus('Select a bone first');return;}
-  if(!coraPoint){setStatus('Place CORA first');return;}
-
-  const obj=objects[selectedIdx];
-  const mesh=obj.mesh;
-
-  if(reset){
-    if(obj._coraOriginal){
-      mesh.position.copy(obj._coraOriginal.pos);
-      mesh.rotation.copy(obj._coraOriginal.rot);
-    }
-    setStatus('⟲ Reset to original position');
-    return;
-  }
-
-  if(!obj._coraOriginal){
-    obj._coraOriginal={pos:mesh.position.clone(),rot:mesh.rotation.clone()};
-  }
-
-  const angleInput=document.getElementById('cora-angle');
-  if(angleInput&&deg!==0){
-    deg=parseFloat(angleInput.value)||deg;
-    if(deg<0)deg=-Math.abs(deg);
-    else deg=Math.abs(deg);
-  }
-
-  // Use ACA direction if set, otherwise fall back to axis selector
-  let rotAxis;
-  if(acaDirection){
-    rotAxis=acaDirection.clone();
-  } else {
-    const axisSelect=document.getElementById('cora-axis');
-    if(axisSelect){
-      switch(axisSelect.value){
-        case 'x': rotAxis=new THREE.Vector3(1,0,0);break;
-        case 'y': rotAxis=new THREE.Vector3(0,1,0);break;
-        case 'z': rotAxis=new THREE.Vector3(0,0,1);break;
-        default: rotAxis=new THREE.Vector3(0,0,1);
-      }
-    } else {
-      rotAxis=new THREE.Vector3(0,0,1);
-    }
-  }
-
-  const rad=THREE.MathUtils.degToRad(deg);
-  const relPos=mesh.position.clone().sub(coraPoint);
-  relPos.applyAxisAngle(rotAxis,rad);
-  mesh.position.copy(coraPoint.clone().add(relPos));
-  mesh.rotateOnWorldAxis(rotAxis,rad);
-  gizmo.attach(mesh);
-
-  const axisLabel=acaDirection?'ACA':document.getElementById('cora-axis')?.value||'Z';
-  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — ${deg.toFixed(1)}° around ${axisLabel}`;
-  setStatus(`↻ Rotated ${deg.toFixed(1)}° around ${axisLabel} at CORA`);
-};
 
 // Add keyboard shortcut
 document.addEventListener('keydown',e=>{
