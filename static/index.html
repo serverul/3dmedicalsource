@@ -1112,25 +1112,49 @@ window.executeSlice=async function(){
   if(selectedIdx<0){setStatus('Select a bone first');return;}
 
   const obj=objects[selectedIdx];
-  if(!obj.caseId||obj.boneIndex===undefined){
-    setStatus('Can only slice bones from DICOM segmentation');
-    return;
-  }
+  _captureUndoState('Osteotomy');
 
   setStatus('Slicing bone...');
   const loading=document.getElementById('loading');
   const progress=document.getElementById('load-progress');
   loading.classList.remove('hidden');
-  progress.textContent='Computing boolean slice...';
+  progress.textContent='Computing osteotomy cut...';
 
   try{
+    // Get mesh data with current world transform baked in
+    const geom=obj.mesh.geometry;
+    const posAttr=geom.getAttribute('position');
+    const idx=geom.getIndex();
+    const wm=obj.mesh.matrixWorld;
+
+    const verts=[];
+    const v=new THREE.Vector3();
+    for(let i=0;i<posAttr.count;i++){
+      v.set(posAttr.getX(i),posAttr.getY(i),posAttr.getZ(i));
+      v.applyMatrix4(wm);
+      verts.push([v.x,v.y,v.z]);
+    }
+
+    const faces=[];
+    if(idx){
+      for(let i=0;i<idx.count;i+=3){
+        faces.push([idx.getX(i),idx.getX(i+1),idx.getX(i+2)]);
+      }
+    }else{
+      for(let i=0;i<posAttr.count;i+=3){
+        faces.push([i,i+1,i+2]);
+      }
+    }
+
+    progress.textContent='Sending to server ('+verts.length+' vertices)...';
+
     const fd=new FormData();
-    fd.append('case_id',obj.caseId);
-    fd.append('bone_index',obj.boneIndex);
+    fd.append('vertices',JSON.stringify(verts));
+    fd.append('faces',JSON.stringify(faces));
     fd.append('plane_origin',JSON.stringify([shapeOrigin.x,shapeOrigin.y,shapeOrigin.z]));
     fd.append('plane_normal',JSON.stringify([shapeNormal.x,shapeNormal.y,shapeNormal.z]));
 
-    const resp=await fetch('/api/cut-bone',{method:'POST',body:fd});
+    const resp=await fetch('/api/slice-mesh',{method:'POST',body:fd});
     if(!resp.ok){
       const e=await resp.json().catch(()=>({detail:resp.statusText}));
       throw new Error(e.detail||'Slice failed');
@@ -1140,15 +1164,18 @@ window.executeSlice=async function(){
 
     const origColor=obj.color;
     const origName=obj.name;
+
+    // Remove original bone
     scene.remove(obj.mesh);obj.mesh.geometry.dispose();obj.mesh.material.dispose();
     objects.splice(selectedIdx,1);selectedIdx=-1;gizmo.detach();
 
-    if(!data.positive.empty)addFragment(data.positive,origColor+0x222200,origName+'_pos',obj.caseId);
-    if(!data.negative.empty)addFragment(data.negative,origColor-0x002200,origName+'_neg',obj.caseId);
+    // Add fragments
+    if(!data.positive.empty)addFragment(data.positive,origColor+0x222200,origName+'_proximal');
+    if(!data.negative.empty)addFragment(data.negative,origColor-0x002200,origName+'_distal');
 
     clearShape();
     updateBoneList();
-    setStatus('Bone sliced into fragments');
+    setStatus('✅ Osteotomy complete — bone cut into fragments. Use CORA rotation to reposition.');
   }catch(e){
     setStatus('Slice error: '+e.message);
   }finally{
@@ -1156,14 +1183,14 @@ window.executeSlice=async function(){
   }
 };
 
-function addFragment(meshData,color,name,cId){
+function addFragment(meshData,color,name){
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(meshData.vertices.flat()),3));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.faces.flat()),1));
   geo.computeVertexNormals();
   const mat=new THREE.MeshStandardMaterial({color:color&0xffffff,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
   const mesh=new THREE.Mesh(geo,mat);mesh.name=name;scene.add(mesh);
-  objects.push({mesh,name,color:color&0xffffff,origPos:mesh.position.clone(),visible:true,transparent:false,caseId:cId,boneIndex:undefined});
+  objects.push({mesh,name,color:color&0xffffff,origPos:mesh.position.clone(),visible:true,transparent:false,caseId:null,boneIndex:undefined});
   selectObject(objects.length-1);
 }
 

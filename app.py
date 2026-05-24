@@ -2431,6 +2431,57 @@ def cut_bone(
         "negative": mesh_to_data(neg_fragment, f"neg_bone_{bone_index}"),
     }
 
+
+@app.post("/api/slice-mesh")
+async def slice_mesh(
+    vertices: str = Form(...),   # JSON [[x,y,z], ...]
+    faces: str = Form(...),      # JSON [[i,j,k], ...]
+    plane_origin: str = Form(...),  # JSON [x,y,z]
+    plane_normal: str = Form(...),  # JSON [x,y,z]
+):
+    """Slice any mesh (sent from frontend) along a plane.
+    Returns two fragment meshes as vertex/face data.
+    Works for any mesh regardless of source (DICOM, STL upload, etc).
+    """
+    try:
+        verts = np.array(json.loads(vertices), dtype=float)
+        facs = np.array(json.loads(faces), dtype=int)
+        origin = np.array(json.loads(plane_origin), dtype=float)
+        normal = np.array(json.loads(plane_normal), dtype=float)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid JSON data: {e}")
+
+    norm_val = np.linalg.norm(normal)
+    if norm_val < 1e-12:
+        raise HTTPException(400, "Plane normal is degenerate")
+    normal = normal / norm_val
+
+    if len(verts) < 3 or len(facs) < 1:
+        raise HTTPException(400, "Mesh too small to slice")
+
+    mesh = trimesh.Trimesh(vertices=verts, faces=facs)
+
+    pos_fragment = safe_slice(mesh, normal, origin, cap=True)
+    neg_fragment = safe_slice(mesh, -normal, origin, cap=True)
+
+    def mesh_to_data(m, name):
+        if len(m.vertices) == 0:
+            return {"name": name, "vertices": [], "faces": [], "empty": True}
+        return {
+            "name": name,
+            "vertices": m.vertices.tolist(),
+            "faces": m.faces.tolist(),
+            "empty": False,
+            "vertex_count": len(m.vertices),
+            "face_count": len(m.faces),
+        }
+
+    return {
+        "positive": mesh_to_data(pos_fragment, "pos"),
+        "negative": mesh_to_data(neg_fragment, "neg"),
+    }
+
+
 @app.post("/api/cut-multi")
 def cut_multi(
     case_id: str,
