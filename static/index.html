@@ -165,6 +165,33 @@ canvas{display:block}
       <div id="align-status" style="font-size:10px;color:#666;margin-top:4px"></div>
     </div>
 
+    <!-- CORA System (Paley) -->
+    <div class="section">
+      <label>🎯 CORA — Center of Rotation</label>
+      <div class="tool-group">
+        <div class="tool-btn" data-tool="place-cora" onclick="setTool('place-cora')">📍 Place CORA</div>
+        <div class="tool-btn" data-tool="draw-axis" onclick="setTool('draw-axis')">📏 Draw Axis</div>
+      </div>
+      <div class="tool-group">
+        <div class="tool-btn" onclick="rotateAroundCORA(15)" style="background:#2a2a4a;color:#aaf">↻ +15°</div>
+        <div class="tool-btn" onclick="rotateAroundCORA(-15)" style="background:#2a2a4a;color:#aaf">↺ -15°</div>
+        <div class="tool-btn" onclick="rotateAroundCORA(0,true)" style="background:#3a2a3a;color:#faf">⟲ Reset</div>
+      </div>
+      <div class="section-row" style="margin-top:4px">
+        <div><label style="font-size:10px">Angle °</label><input type="number" id="cora-angle" value="15" step="1" style="font-size:11px"></div>
+        <div><label style="font-size:10px">Axis</label>
+          <select id="cora-axis" style="font-size:11px;padding:4px;background:#1a1a2a;border:1px solid #333;color:#e0e0e0;border-radius:4px">
+            <option value="z">Z (sagittal)</option>
+            <option value="x">X (coronal)</option>
+            <option value="y">Y (axial)</option>
+            <option value="custom">Custom normal</option>
+          </select>
+        </div>
+      </div>
+      <div id="cora-status" style="font-size:10px;color:#666;margin-top:4px">No CORA placed</div>
+      <div id="cora-axes-status" style="font-size:10px;color:#555;margin-top:2px"></div>
+    </div>
+
     <!-- Undo/Redo -->
     <div class="section">
       <label>↩️ History</label>
@@ -264,7 +291,7 @@ canvas{display:block}
       <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
       <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
       <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
-      <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
+      <kbd>C</kbd> Place CORA &nbsp; <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
     </div>
 
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
@@ -347,6 +374,13 @@ let isRotatingShape=false;
 let isExtrudingShape=false;
 let extrudeDepth=50;
 let moveAxis=null;
+
+// CORA state (Paley Center of Rotation of Angulation)
+let coraPoint=null; // THREE.Vector3 - the CORA position
+let coraMarker=null; // THREE.Group - visual marker
+let coraAxes=null; // THREE.Group - axis lines
+let anatAxes=[]; // {points:[p1,p2], objects:[], label} - drawn anatomical axes
+let coraHistory=[]; // {originalPos, originalRot} for undo
 
 // Measurement state
 let measureMode=null; // 'distance'|'angle'|'polyline'
@@ -461,6 +495,15 @@ window.setTool=function(tool){
     setStatus('🎯 Click alignment points (3 source + 3 target)');
   }
 
+  if(tool==='place-cora'){
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('📍 Click on bone to set CORA (Center of Rotation of Angulation)');
+  } else if(tool==='draw-axis'){
+    measureMode='anat-axis';
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('📏 Click 2 points to draw an anatomical axis');
+  }
+
   if(tool==='select'){
     document.getElementById('measurements').classList.add('hidden');
   }
@@ -483,6 +526,10 @@ container.addEventListener('click',e=>{
     } else deselectAll();
   } else if(currentTool==='rect-cut'||currentTool==='circle-cut'||currentTool==='line-cut'){
     handleShapeClick();
+  } else if(currentTool==='place-cora'){
+    handlePlaceCORA();
+  } else if(measureMode==='anat-axis'){
+    handleAnatAxisClick();
   } else if(measureMode==='diameter'){
     handleDiameterClick();
   } else if(measureMode==='surface-line'){
@@ -672,6 +719,12 @@ window.clearMeasurements=function(){
   surfaceLinePoints=[];
   surfaceLineObjs.forEach(m=>{if(m.parent)scene.remove(m)});
   surfaceLineObjs=[];
+  // Clear anatomical axes
+  anatAxes.forEach(a=>a.objects.forEach(o=>{if(o.parent)scene.remove(o)}));
+  anatAxes=[];
+  anatAxisPoints=[];
+  anatAxisMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  anatAxisMarkers=[];
   updateMeasureInfoPanel();
   document.getElementById('measure-info').classList.add('hidden');
   setStatus('Measurements cleared');
@@ -1125,10 +1178,11 @@ function updateBoneList(){
     const hex='#'+o.color.toString(16).padStart(6,'0');
     const icon=o.type==='plane'?'✂️':o.type==='screw'?'🔩':o.type==='kwire'?'📌':o.type==='cylinder'?'🔧':'🦴';
     const visClass=o.visible?'':'hidden-bone';
+    const coraTag=o._coraOriginal?' 🎯':'';
     return `<div class="bone-item ${sel}" onclick="selectObject(${i})">
       <div class="bone-color" style="background:${hex}"></div>
       <span class="bone-vis ${visClass}" onclick="toggleVis(${i});event.stopPropagation()">${o.visible?'👁':'🚫'}</span>
-      <span class="bone-name" ondblclick="startRename(${i},event)">${icon} ${o.name}</span>
+      <span class="bone-name" ondblclick="startRename(${i},event)">${icon} ${o.name}${coraTag}</span>
     </div>`;
   }).join('');
   document.getElementById('obj-count').textContent=objects.length+' objects';
@@ -1551,6 +1605,232 @@ window.ungroupSelected=function(){
   updateBoneList();
   setStatus('📦 Ungrouped');
 };
+
+// ============ CORA SYSTEM (Paley) ============
+
+function handlePlaceCORA(){
+  const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const point=hits[0].point.clone();
+  setCORA(point);
+  setTool('select');
+}
+
+function setCORA(point){
+  coraPoint=point.clone();
+  // Remove old marker
+  if(coraMarker){scene.remove(coraMarker);}
+  if(coraAxes){scene.remove(coraAxes);}
+
+  // Create CORA marker: crosshair with colored axes
+  const group=new THREE.Group();
+  group.position.copy(coraPoint);
+
+  // Central sphere (gold)
+  const sphereGeo=new THREE.SphereGeometry(3,24,24);
+  const sphereMat=new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:0.6});
+  group.add(new THREE.Mesh(sphereGeo,sphereMat));
+
+  // Wireframe sphere
+  const wireGeo=new THREE.SphereGeometry(4,16,16);
+  const wireMat=new THREE.MeshBasicMaterial({color:0xffd700,wireframe:true,transparent:true,opacity:0.4});
+  group.add(new THREE.Mesh(wireGeo,wireMat));
+
+  // Ring at equator
+  const ringGeo=new THREE.TorusGeometry(8,0.4,8,32);
+  const ringMat=new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:0.5});
+  const ring=new THREE.Mesh(ringGeo,ringMat);
+  ring.rotation.x=Math.PI/2;
+  group.add(ring);
+
+  scene.add(group);
+  coraMarker=group;
+
+  // Create axis lines
+  const axisGroup=new THREE.Group();
+  axisGroup.position.copy(coraPoint);
+  const axisLen=30;
+  // X axis (red)
+  const xGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-axisLen,0,0),new THREE.Vector3(axisLen,0,0)]);
+  axisGroup.add(new THREE.Line(xGeo,new THREE.LineBasicMaterial({color:0xff4444,linewidth:2})));
+  // Y axis (green)
+  const yGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,-axisLen,0),new THREE.Vector3(0,axisLen,0)]);
+  axisGroup.add(new THREE.Line(yGeo,new THREE.LineBasicMaterial({color:0x44ff44,linewidth:2})));
+  // Z axis (blue)
+  const zGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,-axisLen),new THREE.Vector3(0,0,axisLen)]);
+  axisGroup.add(new THREE.Line(zGeo,new THREE.LineBasicMaterial({color:0x4444ff,linewidth:2})));
+
+  scene.add(axisGroup);
+  coraAxes=axisGroup;
+
+  // Label
+  const label=createLabel(`CORA (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)})`,coraPoint.clone().add(new THREE.Vector3(0,12,0)));
+  scene.add(label);
+  coraMarker.userData.label=label;
+
+  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)})`;
+  document.getElementById('cora-status').style.color='#ffd700';
+  setStatus(`📍 CORA placed at (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)})`);
+}
+
+// Rotate selected bone around CORA
+window.rotateAroundCORA=function(deg,reset){
+  if(selectedIdx<0){setStatus('Select a bone first');return;}
+  if(!coraPoint){setStatus('Place CORA first (click 📍 Place CORA)');return;}
+
+  const obj=objects[selectedIdx];
+  const mesh=obj.mesh;
+
+  if(reset){
+    // Reset to original position
+    if(obj._coraOriginal){
+      mesh.position.copy(obj._coraOriginal.pos);
+      mesh.rotation.copy(obj._coraOriginal.rot);
+    }
+    setStatus('⟲ Reset to original position');
+    return;
+  }
+
+  // Save original position on first CORA rotation
+  if(!obj._coraOriginal){
+    obj._coraOriginal={pos:mesh.position.clone(),rot:mesh.rotation.clone()};
+  }
+
+  // Use custom angle if provided
+  const angleInput=document.getElementById('cora-angle');
+  if(angleInput && deg!==0){
+    deg=parseFloat(angleInput.value)||deg;
+    if(deg<0)deg=-Math.abs(deg);
+    else deg=Math.abs(deg);
+  }
+
+  // Determine rotation axis
+  const axisSelect=document.getElementById('cora-axis');
+  let rotAxis;
+  if(axisSelect){
+    switch(axisSelect.value){
+      case 'x': rotAxis=new THREE.Vector3(1,0,0);break;
+      case 'y': rotAxis=new THREE.Vector3(0,1,0);break;
+      case 'z': rotAxis=new THREE.Vector3(0,0,1);break;
+      default: rotAxis=new THREE.Vector3(0,0,1);break;
+    }
+  } else {
+    rotAxis=new THREE.Vector3(0,0,1);
+  }
+
+  // CORA rotation: translate to CORA, rotate, translate back
+  const rad=THREE.MathUtils.degToRad(deg);
+
+  // Get current position relative to CORA
+  const relPos=mesh.position.clone().sub(coraPoint);
+
+  // Rotate the relative position around the axis
+  relPos.applyAxisAngle(rotAxis,rad);
+
+  // Set new position
+  mesh.position.copy(coraPoint.clone().add(relPos));
+
+  // Also rotate the mesh itself
+  mesh.rotateOnWorldAxis(rotAxis,rad);
+
+  // Update gizmo
+  gizmo.attach(mesh);
+
+  // Update status
+  const totalDeg=deg;
+  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — rotated ${totalDeg.toFixed(1)}°`;
+  setStatus(`↻ Rotated ${totalDeg.toFixed(1)}° around CORA`);
+};
+
+// Draw anatomical axis
+let anatAxisPoints=[];
+let anatAxisMarkers=[];
+
+function handleAnatAxisClick(){
+  const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const point=hits[0].point.clone();
+  anatAxisPoints.push(point);
+
+  const sGeo=new THREE.SphereGeometry(2,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0x00ffff});
+  const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
+  anatAxisMarkers.push(s);
+
+  if(anatAxisPoints.length===2){
+    // Draw axis line (extending beyond both points)
+    const p1=anatAxisPoints[0],p2=anatAxisPoints[1];
+    const dir=p2.clone().sub(p1).normalize();
+    const extend=200; // extend 200mm in both directions
+    const ext1=p1.clone().sub(dir.clone().multiplyScalar(extend));
+    const ext2=p2.clone().add(dir.clone().multiplyScalar(extend));
+
+    const lineGeo=new THREE.BufferGeometry().setFromPoints([ext1,ext2]);
+    const lineMat=new THREE.LineBasicMaterial({color:0x00ffff,linewidth:2,transparent:true,opacity:0.6});
+    const line=new THREE.Line(lineGeo,lineMat);scene.add(line);
+    anatAxisMarkers.push(line);
+
+    // Calculate angle with previous axes
+    let angleInfo='';
+    if(anatAxes.length>0){
+      const prevDir=anatAxes[anatAxes.length-1].direction;
+      const cosAngle=Math.max(-1,Math.min(1,Math.abs(dir.dot(prevDir))));
+      const angleDeg=Math.acos(cosAngle)*180/Math.PI;
+      angleInfo=` — ${angleDeg.toFixed(1)}° from previous axis`;
+
+      // Auto-find CORA at intersection
+      const intersection=findLineIntersection(
+        anatAxes[anatAxes.length-1].p1, anatAxes[anatAxes.length-1].p2,
+        p1, p2
+      );
+      if(intersection){
+        setCORA(intersection);
+        angleInfo+=` — CORA auto-found!`;
+      }
+    }
+
+    anatAxes.push({p1,p2,direction:dir,objects:[...anatAxisMarkers]});
+    anatAxisPoints=[];
+    anatAxisMarkers=[];
+
+    document.getElementById('cora-axes-status').textContent=`${anatAxes.length} axis/axes drawn${angleInfo}`;
+    setStatus(`📏 Axis drawn — ${anatAxes.length} total${angleInfo}`);
+  } else {
+    setStatus(`📏 Click endpoint 2 for axis`);
+  }
+}
+
+// Find intersection of two lines in 3D (projected to best-fit plane)
+function findLineIntersection(a1,a2,b1,b2){
+  // Use the closest point between two lines
+  const d1=a2.clone().sub(a1);
+  const d2=b2.clone().sub(b1);
+  const n=d1.clone().cross(d2);
+  const nLen=n.length();
+  if(nLen<0.001)return null; // parallel
+
+  // Project to 2D along the plane normal
+  n.normalize();
+  const w=a1.clone().sub(b1);
+  const a=d1.dot(d1),b=d1.dot(d2),c=d2.dot(d2),d=d1.dot(w),e=d2.dot(w);
+  const denom=a*c-b*b;
+  if(Math.abs(denom)<0.001)return null;
+  const t=(b*e-c*d)/denom;
+
+  return a1.clone().add(d1.clone().multiplyScalar(t));
+}
+
+// Add CORA keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='c'||e.key==='C'){
+    if(!e.ctrlKey&&!e.metaKey){
+      setTool('place-cora');
+    }
+  }
+});
 
 // ============ CAMERA ANIMATION ============
 function updateCameraAnimation(){
