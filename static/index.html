@@ -171,6 +171,7 @@ canvas{display:block}
       <div class="tool-group">
         <div class="tool-btn" data-tool="place-cora" onclick="setTool('place-cora')">📍 Place CORA</div>
         <div class="tool-btn" data-tool="draw-axis" onclick="setTool('draw-axis')">📏 Draw Axis</div>
+        <div class="tool-btn" data-tool="joint-line" onclick="setTool('joint-line')">🦿 Joint Line</div>
       </div>
       <div class="tool-group">
         <div class="tool-btn" onclick="rotateAroundCORA(15)" style="background:#2a2a4a;color:#aaf">↻ +15°</div>
@@ -187,6 +188,25 @@ canvas{display:block}
             <option value="custom">Custom normal</option>
           </select>
         </div>
+      </div>
+        <div style="margin-top:4px">
+        <label style="font-size:10px;color:#888">Joint name</label>
+        <select id="joint-name" style="width:100%;font-size:11px;padding:4px;background:#1a1a2a;border:1px solid #333;color:#e0e0e0;border-radius:4px;margin-bottom:4px">
+          <option value="auto">Auto-detect</option>
+          <option value="PFL">PFL — Proximal Femoral Line</option>
+          <option value="DFL">DFL — Distal Femoral Line</option>
+          <option value="PTL">PTL — Proximal Tibial Line</option>
+          <option value="DTL">DTL — Distal Tibial Line</option>
+          <option value="PHL">PHL — Proximal Humeral Line</option>
+          <option value="DHL">DHL — Distal Humeral Line</option>
+          <option value="PRL">PRL — Proximal Radial Line</option>
+          <option value="DRL">DRL — Distal Radial Line</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+      <div id="joint-angles-panel" style="margin-top:6px;border-top:1px solid #222;padding-top:6px">
+        <div style="font-size:10px;color:#888;margin-bottom:4px">Joint Orientation Angles</div>
+        <div id="joint-angles-list" style="font-size:10px;color:#aaa"></div>
       </div>
       <div id="cora-status" style="font-size:10px;color:#666;margin-top:4px">No CORA placed</div>
       <div id="cora-axes-status" style="font-size:10px;color:#555;margin-top:2px"></div>
@@ -291,7 +311,7 @@ canvas{display:block}
       <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
       <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
       <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
-      <kbd>C</kbd> Place CORA &nbsp; <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
+      <kbd>C</kbd> CORA &nbsp; <kbd>J</kbd> Joint Line &nbsp; <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
     </div>
 
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
@@ -502,6 +522,10 @@ window.setTool=function(tool){
     measureMode='anat-axis';
     document.getElementById('measurements').classList.remove('hidden');
     setStatus('📏 Click 2 points to draw an anatomical axis');
+  } else if(tool==='joint-line'){
+    measureMode='joint-line';
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('🦿 Click 2 points on joint surface to draw orientation line');
   }
 
   if(tool==='select'){
@@ -528,6 +552,8 @@ container.addEventListener('click',e=>{
     handleShapeClick();
   } else if(currentTool==='place-cora'){
     handlePlaceCORA();
+  } else if(measureMode==='joint-line'){
+    handleJointLineClick();
   } else if(measureMode==='anat-axis'){
     handleAnatAxisClick();
   } else if(measureMode==='diameter'){
@@ -725,6 +751,13 @@ window.clearMeasurements=function(){
   anatAxisPoints=[];
   anatAxisMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
   anatAxisMarkers=[];
+  // Clear joint lines
+  jointLines.forEach(j=>j.objects.forEach(o=>{if(o.parent)scene.remove(o)}));
+  jointLines=[];
+  jointLinePoints=[];
+  jointLineMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  jointLineMarkers=[];
+  updateJointAngles();
   updateMeasureInfoPanel();
   document.getElementById('measure-info').classList.add('hidden');
   setStatus('Measurements cleared');
@@ -1828,6 +1861,154 @@ document.addEventListener('keydown',e=>{
   if(e.key==='c'||e.key==='C'){
     if(!e.ctrlKey&&!e.metaKey){
       setTool('place-cora');
+    }
+  }
+});
+
+// ============ JOINT ORIENTATION LINES (Paley) ============
+let jointLines=[]; // {name, p1, p2, direction, objects:[], angle}
+let jointLinePoints=[];
+let jointLineMarkers=[];
+
+const JOINT_COLORS={
+  'PFL':0xff6699, // Proximal Femoral — pink
+  'DFL':0xff9966, // Distal Femoral — orange
+  'PTL':0x66ff99, // Proximal Tibial — green
+  'DTL':0x6699ff, // Distal Tibial — blue
+  'PHL':0xff66ff, // Proximal Humeral — magenta
+  'DHL':0x66ffff, // Distal Humeral — cyan
+  'PRL':0xffff66, // Proximal Radial — yellow
+  'DRL':0xcc66ff, // Distal Radial — purple
+  'custom':0xffffff,
+  'auto':0xff8844,
+};
+
+function getJointName(){
+  const sel=document.getElementById('joint-name');
+  if(!sel||sel.value==='auto'){
+    // Auto-assign based on count
+    const names=['PFL','DFL','PTL','DTL'];
+    return names[jointLines.length%names.length];
+  }
+  if(sel.value==='custom'){
+    const name=prompt('Joint line name:','JL'+(jointLines.length+1));
+    return name||'JL'+(jointLines.length+1);
+  }
+  return sel.value;
+}
+
+function handleJointLineClick(){
+  const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const point=hits[0].point.clone();
+  jointLinePoints.push(point);
+
+  const sGeo=new THREE.SphereGeometry(2,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xff8844});
+  const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
+  jointLineMarkers.push(s);
+
+  if(jointLinePoints.length===2){
+    const p1=jointLinePoints[0],p2=jointLinePoints[1];
+    const name=getJointName();
+    const color=JOINT_COLORS[name]||JOINT_COLORS['auto'];
+    const dir=p2.clone().sub(p1).normalize();
+
+    // Draw the joint orientation line (short, across the joint surface)
+    const lineGeo=new THREE.BufferGeometry().setFromPoints([p1,p2]);
+    const lineMat=new THREE.LineBasicMaterial({color,linewidth:3});
+    const line=new THREE.Line(lineGeo,lineMat);scene.add(line);
+
+    // Draw perpendicular tick marks to show orientation
+    const mid=p1.clone().add(p2).multiplyScalar(0.5);
+    const tickLen=5;
+    const perp=new THREE.Vector3().crossVectors(dir,new THREE.Vector3(0,1,0)).normalize();
+    if(perp.length()<0.1)perp.crossVectors(dir,new THREE.Vector3(1,0,0)).normalize();
+    const tick1=new THREE.BufferGeometry().setFromPoints([mid.clone().sub(perp.clone().multiplyScalar(tickLen)),mid.clone().add(perp.clone().multiplyScalar(tickLen))]);
+    scene.add(new THREE.Line(tick1,new THREE.LineBasicMaterial({color,linewidth:1})));
+
+    // Label
+    const angleLabel=calcJointAngleLabel(name);
+    const labelPos=mid.clone().add(new THREE.Vector3(0,10,0));
+    const label=createLabel(`${name}${angleLabel}`,labelPos);
+    scene.add(label);
+
+    const objs=[...jointLineMarkers,line,label];
+    jointLines.push({name,p1,p2,direction:dir,objects:objs,color});
+
+    // Calculate and display angles between joint lines
+    updateJointAngles();
+
+    jointLinePoints=[];
+    jointLineMarkers=[];
+    setStatus(`🦿 ${name} drawn${angleLabel}`);
+  } else {
+    setStatus(`🦿 Click endpoint 2 for joint line`);
+  }
+}
+
+function calcJointAngleLabel(newName){
+  if(jointLines.length===0)return '';
+  // Find the most recent different joint line
+  for(let i=jointLines.length-1;i>=0;i--){
+    if(jointLines[i].name!==newName){
+      const prevDir=jointLines[i].direction;
+      const newDir=jointLinePoints.length>=2 ?
+        jointLinePoints[1].clone().sub(jointLinePoints[0]).normalize() :
+        new THREE.Vector3(0,1,0);
+      const cosAngle=Math.max(-1,Math.min(1,Math.abs(prevDir.dot(newDir))));
+      const angleDeg=Math.acos(cosAngle)*180/Math.PI;
+      return ` — ${angleDeg.toFixed(1)}°`;
+    }
+  }
+  return '';
+}
+
+function updateJointAngles(){
+  const list=document.getElementById('joint-angles-list');
+  if(!list)return;
+
+  let html='';
+  // Standard Paley angles
+  const paleyAngles=[
+    ['mLDFA','DFL','PFL','mech. lat. distal femoral angle'],
+    ['MPTA','PTL','DFL','med. proximal tibial angle'],
+    ['mLDTA','DTL','PTL','mech. lat. distal tibial angle'],
+    ['MNSA','PFL','DFL','med. neck-shaft angle'],
+  ];
+
+  const named={};
+  jointLines.forEach(jl=>{named[jl.name]=jl.direction;});
+
+  // Calculate pairwise angles
+  for(let i=0;i<jointLines.length;i++){
+    for(let j=i+1;j<jointLines.length;j++){
+      const a=jointLines[i],b=jointLines[j];
+      const cosAngle=Math.max(-1,Math.min(1,Math.abs(a.direction.dot(b.direction))));
+      const angleDeg=Math.acos(cosAngle)*180/Math.acos(cosAngle)*180/Math.PI;
+      html+=`<div style="margin-bottom:2px"><span style="color:#888">${a.name}↔${b.name}:</span> <span style="color:#ffd700;font-weight:600">${angleDeg.toFixed(1)}°</span></div>`;
+    }
+  }
+
+  // Paley standard angles
+  for(const [label,n1,n2,desc] of paleyAngles){
+    if(named[n1]&&named[n2]){
+      const cosAngle=Math.max(-1,Math.min(1,Math.abs(named[n1].dot(named[n2]))));
+      const angleDeg=Math.acos(cosAngle)*180/Math.PI;
+      html+=`<div style="margin-bottom:2px;border-top:1px solid #222;padding-top:2px"><span style="color:#4a9aff;font-weight:600">${label}</span> <span style="color:#ffd700">${angleDeg.toFixed(1)}°</span><br><span style="color:#555;font-size:9px">${desc}</span></div>`;
+    }
+  }
+
+  list.innerHTML=html||'<span style="color:#555">Draw joint lines to see angles</span>';
+}
+
+// Add joint line keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='j'||e.key==='J'){
+    if(!e.ctrlKey&&!e.metaKey){
+      setTool('joint-line');
     }
   }
 });
