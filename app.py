@@ -3864,4 +3864,149 @@ def generate_report(case_id: str):
     return report
 
 
+
+
+# ========== MEASUREMENT ENDPOINTS ==========
+
+@app.post("/api/measure-distance")
+async def measure_distance(point1: list[float] = Body(...), point2: list[float] = Body(...)):
+    """Calculate distance between two 3D points in mm."""
+    p1 = np.array(point1)
+    p2 = np.array(point2)
+    dist = float(np.linalg.norm(p2 - p1))
+    return {"distance_mm": round(dist, 2), "point1": point1, "point2": point2}
+
+
+@app.post("/api/measure-angle")
+async def measure_angle(
+    point1: list[float] = Body(...),
+    vertex: list[float] = Body(...),
+    point2: list[float] = Body(...),
+):
+    """Calculate angle at vertex between two vectors (point1-vertex-point2) in degrees."""
+    v1 = np.array(point1) - np.array(vertex)
+    v2 = np.array(point2) - np.array(vertex)
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    if n1 < 1e-8 or n2 < 1e-8:
+        return {"angle_degrees": 0.0, "radians": 0.0}
+    cos_angle = float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0))
+    angle_rad = float(np.arccos(cos_angle))
+    angle_deg = float(np.degrees(angle_rad))
+    return {"angle_degrees": round(angle_deg, 2), "radians": round(angle_rad, 4)}
+
+
+@app.post("/api/measure-polyline")
+async def measure_polyline(points: list[list[float]] = Body(...)):
+    """Calculate total length of a polyline through multiple 3D points."""
+    if len(points) < 2:
+        return {"total_length_mm": 0.0, "segment_count": 0}
+    total = 0.0
+    pts = [np.array(p) for p in points]
+    for i in range(1, len(pts)):
+        total += float(np.linalg.norm(pts[i] - pts[i - 1]))
+    return {"total_length_mm": round(total, 2), "segment_count": len(points) - 1}
+
+
+# ========== PLANNING OBJECT ENDPOINTS ==========
+
+@app.post("/api/create-planning-object")
+async def create_planning_object(
+    case_id: str = Body(...),
+    obj_type: str = Body(...),
+    position: list[float] = Body([0, 0, 0]),
+    rotation: list[float] = Body([0, 0, 0]),
+    params: dict = Body(default={}),
+):
+    """Create a planning object (plane, screw, kwire, cylinder)."""
+    case_dir = CASES / case_id
+    if not case_dir.exists():
+        raise HTTPException(404, "Case not found")
+    
+    obj_id = f"{obj_type}_{len(list(case_dir.glob('planning_*.json')))}"
+    
+    obj_data = {
+        "id": obj_id,
+        "type": obj_type,
+        "position": position,
+        "rotation": rotation,
+        "params": params,
+    }
+    
+    with open(case_dir / f"planning_{obj_id}.json", "w") as f:
+        json.dump(obj_data, f, indent=2)
+    
+    return {"object_id": obj_id, "type": obj_type, "status": "created"}
+
+
+@app.get("/api/cases/{case_id}/planning-objects")
+async def get_planning_objects(case_id: str):
+    """Get all planning objects for a case."""
+    case_dir = CASES / case_id
+    if not case_dir.exists():
+        raise HTTPException(404, "Case not found")
+    
+    objects = []
+    for f in sorted(case_dir.glob("planning_*.json")):
+        with open(f) as fh:
+            objects.append(json.load(fh))
+    
+    return {"objects": objects}
+
+
+@app.post("/api/osteotomy")
+async def osteotomy(
+    case_id: str = Form(...),
+    bone_index: int = Form(...),
+    plane_origin: str = Form(...),
+    plane_normal: str = Form(...),
+    reposition_translate: str = Form(default="null"),
+    reposition_rotate: str = Form(default="null"),
+):
+    """Perform osteotomy: cut bone and optionally reposition fragment."""
+    origin = np.array(json.loads(plane_origin), dtype=float)
+    normal = np.array(json.loads(plane_normal), dtype=float)
+    
+    case_dir = CASES / case_id
+    if not case_dir.exists():
+        raise HTTPException(404, "Case not found")
+    
+    bone_path = case_dir / f"bone_{bone_index}.stl"
+    if not bone_path.exists():
+        raise HTTPException(404, "Bone mesh not found")
+    
+    mesh = trimesh.load(str(bone_path), force="mesh")
+    
+    positive, negative = slice_mesh(mesh, origin.tolist(), normal.tolist())
+    
+    result = {"positive": {"empty": True}, "negative": {"empty": True}}
+    
+    reposition = None
+    if reposition_translate and reposition_translate != "null":
+        reposition = {"translate": json.loads(reposition_translate)}
+    if reposition_rotate and reposition_rotate != "null":
+        if reposition is None:
+            reposition = {}
+        reposition["rotate"] = json.loads(reposition_rotate)
+    
+    for side, sliced in [("positive", positive), ("negative", negative)]:
+        if sliced is not None and len(sliced.vertices) > 0:
+            if side == "positive" and reposition:
+                if "translate" in reposition:
+                    t = np.array(reposition["translate"], dtype=float)
+                    sliced.vertices += t
+                if "rotate" in reposition:
+                    r = np.array(reposition["rotate"], dtype=float)
+                    rot_mat = trimesh.transformations.euler_matrix(*np.radians(r))
+                    sliced.apply_transform(rot_mat)
+            
+            result[side] = {
+                "empty": False,
+                "vertices": sliced.vertices.tolist(),
+                "faces": sliced.faces.tolist(),
+            }
+    
+    return result
+
+
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

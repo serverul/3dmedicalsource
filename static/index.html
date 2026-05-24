@@ -35,6 +35,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .bone-item:hover{background:#1a1a2a}
 .bone-item.selected{background:#1a2a3a;border-left:3px solid #4a9aff}
 .bone-color{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.bone-vis{cursor:pointer;font-size:14px;opacity:0.6;transition:opacity .15s}
+.bone-vis:hover{opacity:1}
+.bone-vis.hidden-bone{opacity:0.3}
+.bone-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bone-name input{background:#1a1a2a;border:1px solid #4a9aff;color:#e0e0e0;font-size:12px;padding:2px 4px;border-radius:3px;width:100%}
 
 /* Status */
 #status{padding:8px 14px;background:#0e0e16;border-top:1px solid #2a2a3a;font-size:11px;color:#666;display:flex;justify-content:space-between}
@@ -64,8 +69,16 @@ canvas{display:block}
 #measurements{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.9);padding:8px 16px;border-radius:6px;border:1px solid #333;font-size:12px;z-index:10;white-space:nowrap}
 #measurements.hidden{display:none}
 
+/* Measure info panel */
+#measure-info{position:absolute;top:60px;left:12px;background:rgba(20,20,30,0.95);padding:12px;border-radius:6px;border:1px solid #333;z-index:10;width:240px;font-size:12px;max-height:300px;overflow-y:auto}
+#measure-info.hidden{display:none}
+#measure-info h3{font-size:12px;color:#ffcc00;margin-bottom:8px}
+.measure-entry{padding:4px 0;border-bottom:1px solid #222;font-size:11px;color:#ccc}
+.measure-entry .label{color:#888;font-size:10px}
+.measure-entry .value{color:#ffcc00;font-weight:600}
+
 /* Hotkeys */
-#hotkeys{position:absolute;bottom:12px;right:12px;background:rgba(20,20,30,0.85);padding:8px 12px;border-radius:6px;border:1px solid #333;font-size:10px;color:#666;z-index:10;max-width:260px}
+#hotkeys{position:absolute;bottom:12px;right:12px;background:rgba(20,20,30,0.85);padding:8px 12px;border-radius:6px;border:1px solid #333;font-size:10px;color:#666;z-index:10;max-width:280px}
 #hotkeys kbd{background:#2a2a3a;padding:1px 4px;border-radius:3px;color:#aaa}
 
 /* Loading */
@@ -95,18 +108,42 @@ canvas{display:block}
       </div>
     </div>
 
-    <!-- Cutting Tools (JMesh-inspired) -->
+    <!-- Cutting Tools -->
     <div class="section">
-      <label>Cutting Tools</label>
+      <label>✂️ Cutting Tools</label>
       <div class="tool-group">
         <div class="tool-btn active" data-tool="select" onclick="setTool('select')">🎯 Select</div>
-        <div class="tool-btn" data-tool="rect-cut" onclick="setTool('rect-cut')">▭ Rectangle Cut</div>
-        <div class="tool-btn" data-tool="circle-cut" onclick="setTool('circle-cut')">◯ Circle Cut</div>
-        <div class="tool-btn" data-tool="line-cut" onclick="setTool('line-cut')">╱ Line Cut</div>
+        <div class="tool-btn" data-tool="rect-cut" onclick="setTool('rect-cut')">▭ Rect</div>
+        <div class="tool-btn" data-tool="circle-cut" onclick="setTool('circle-cut')">◯ Circle</div>
+        <div class="tool-btn" data-tool="line-cut" onclick="setTool('line-cut')">╱ Line</div>
       </div>
       <div class="tool-group">
-        <div class="tool-btn" onclick="executeSlice()" style="background:#2a3a2a;color:#6f6">✂️ Slice Bone</div>
-        <div class="tool-btn" onclick="clearShape()">🗑 Clear Shape</div>
+        <div class="tool-btn" onclick="executeSlice()" style="background:#2a3a2a;color:#6f6">✂️ Slice</div>
+        <div class="tool-btn" onclick="clearShape()">🗑 Clear</div>
+      </div>
+    </div>
+
+    <!-- Measurement Tools -->
+    <div class="section">
+      <label>📏 Measurements</label>
+      <div class="tool-group">
+        <div class="tool-btn" data-tool="measure-dist" onclick="setTool('measure-dist')">📏 Distance</div>
+        <div class="tool-btn" data-tool="measure-angle" onclick="setTool('measure-angle')">📐 Angle</div>
+        <div class="tool-btn" data-tool="measure-poly" onclick="setTool('measure-poly')">〰️ Polyline</div>
+      </div>
+      <div class="tool-group">
+        <div class="tool-btn" onclick="clearMeasurements()" style="background:#3a2a2a;color:#f66">🗑 Clear All</div>
+      </div>
+    </div>
+
+    <!-- Planning Objects -->
+    <div class="section">
+      <label>🦴 Planning Objects</label>
+      <div class="tool-group">
+        <div class="tool-btn" onclick="createPlanningObj('plane')">✂️ Osteotomy Plane</div>
+        <div class="tool-btn" onclick="createPlanningObj('screw')">🔩 Screw</div>
+        <div class="tool-btn" onclick="createPlanningObj('kwire')">📌 K-Wire</div>
+        <div class="tool-btn" onclick="createPlanningObj('cylinder')">🔧 Cylinder</div>
       </div>
     </div>
 
@@ -173,17 +210,24 @@ canvas{display:block}
       </div>
     </div>
 
-    <!-- Measurements -->
+    <!-- Measurements overlay -->
     <div id="measurements" class="hidden">
       <span id="measure-text"></span>
     </div>
 
+    <!-- Measure info panel -->
+    <div id="measure-info" class="hidden">
+      <h3>📏 Measurements</h3>
+      <div id="measure-list"></div>
+    </div>
+
     <div id="hotkeys">
       <kbd>1</kbd> Select &nbsp; <kbd>2</kbd> Rect &nbsp; <kbd>3</kbd> Circle &nbsp; <kbd>4</kbd> Line<br>
+      <kbd>D</kbd> Distance &nbsp; <kbd>A</kbd> Angle &nbsp; <kbd>P</kbd> Polyline<br>
       <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
       <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
       <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
-      <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus
+      <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
     </div>
 
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
@@ -198,6 +242,7 @@ canvas{display:block}
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
+import {CSS2DRenderer,CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ============ SCENE ============
 const container=document.getElementById('viewer');
@@ -213,6 +258,14 @@ renderer.toneMappingExposure=1.2;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.localClippingEnabled=true;
 container.appendChild(renderer.domElement);
+
+// CSS2D renderer for labels
+const labelRenderer=new CSS2DRenderer();
+labelRenderer.setSize(container.clientWidth,container.clientHeight);
+labelRenderer.domElement.style.position='absolute';
+labelRenderer.domElement.style.top='0';
+labelRenderer.domElement.style.pointerEvents='none';
+container.appendChild(labelRenderer.domElement);
 
 scene.add(new THREE.AmbientLight(0x404050,0.6));
 scene.add(new THREE.HemisphereLight(0x8899bb,0x443322,0.5));
@@ -241,35 +294,92 @@ const mouse=new THREE.Vector2();
 
 // ============ STATE ============
 const COLORS=[0xE8D5B7,0xD4C4A8,0xC9B896,0xBFA87A,0xB59868,0xF5E6D0,0xDBC8AA,0xC4B08C,0xAD9870,0x9A8460];
+const PLAN_COLORS={plane:0xff4444,screw:0x888899,kwire:0xcccc00,cylinder:0x6688aa};
 let objects=[];
 let selectedIdx=-1;
 let currentTool='select';
 let caseId=null;
 
-// Shape state (JMesh-inspired)
-let activeShape=null; // THREE.Mesh - the cutting plane visualization
-let shapeType='rect'; // rect|circle|line
-let shapeOrigin=null; // Vector3 - center of shape on bone surface
-let shapeNormal=null; // Vector3 - surface normal at click point
-let shapePoints=[]; // Vector3[] - for line tool
+// Shape state
+let activeShape=null;
+let shapeType='rect';
+let shapeOrigin=null;
+let shapeNormal=null;
 let isMovingShape=false;
 let isRotatingShape=false;
 let isExtrudingShape=false;
 let extrudeDepth=50;
-let moveAxis=null; // 'X','Y','Z',null
+let moveAxis=null;
+
+// Measurement state
+let measureMode=null; // 'distance'|'angle'|'polyline'
+let measurePoints=[]; // Vector3[] - points being placed
+let measurePointMarkers=[]; // THREE.Mesh[] - visual markers
+let measurements=[]; // {type, points, lines, labels, value}
+
+// Camera animation
+let cameraAnim=null; // {from, to, targetFrom, targetTo, progress}
+
+// ============ DOUBLE-CLICK CENTER ============
+container.addEventListener('dblclick',e=>{
+  if(gizmo.dragging)return;
+  const rect=renderer.domElement.getBoundingClientRect();
+  mouse.x=((e.clientX-rect.left)/rect.width)*2-1;
+  mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(mouse,camera);
+
+  const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length>0){
+    const obj=objects.find(o=>o.mesh===hits[0].object);
+    if(obj)animateCameraToObject(obj);
+  }
+});
+
+function animateCameraToObject(obj){
+  const box=new THREE.Box3().setFromObject(obj.mesh);
+  const center=box.getCenter(new THREE.Vector3());
+  const size=box.getSize(new THREE.Vector3());
+  const maxDim=Math.max(size.x,size.y,size.z);
+  const dist=maxDim*2.5;
+
+  // Camera position: offset from center along current view direction
+  const dir=camera.position.clone().sub(orbit.target).normalize();
+  const newPos=center.clone().add(dir.multiplyScalar(dist));
+
+  cameraAnim={
+    posFrom:camera.position.clone(),
+    posTo:newPos,
+    targetFrom:orbit.target.clone(),
+    targetTo:center.clone(),
+    progress:0
+  };
+
+  // Also select the object
+  const idx=objects.indexOf(obj);
+  if(idx>=0)selectObject(idx);
+}
 
 // ============ TOOL MANAGEMENT ============
 window.setTool=function(tool){
+  // Clear measure mode if switching away
+  if(measureMode&&(tool!=='measure-dist'&&tool!=='measure-angle'&&tool!=='measure-poly')){
+    finalizeMeasurePoints();
+  }
+
   currentTool=tool;
+  measureMode=null;
+
   document.querySelectorAll('.tool-btn[data-tool]').forEach(b=>{
     b.classList.toggle('active',b.dataset.tool===tool);
   });
+
+  // Shape tools
   if(tool==='rect-cut'||tool==='circle-cut'||tool==='line-cut'){
     shapeType=tool.replace('-cut','');
     clearShape();
     document.getElementById('shape-panel').classList.remove('hidden');
     document.getElementById('measurements').classList.remove('hidden');
-    // Show relevant params
     document.getElementById('shape-width').parentElement.style.display=shapeType==='rect'?'flex':'none';
     document.getElementById('shape-height').parentElement.style.display=shapeType==='rect'?'flex':'none';
     document.getElementById('shape-radius').parentElement.style.display=shapeType==='circle'?'flex':'none';
@@ -278,6 +388,24 @@ window.setTool=function(tool){
     setStatus('Click on bone surface to place cutting shape');
   } else {
     document.getElementById('shape-panel').classList.add('hidden');
+  }
+
+  // Measure tools
+  if(tool==='measure-dist'){
+    measureMode='distance';
+    document.getElementById('measure-info').classList.remove('hidden');
+    setStatus('📏 Click 2 points to measure distance');
+  } else if(tool==='measure-angle'){
+    measureMode='angle';
+    document.getElementById('measure-info').classList.remove('hidden');
+    setStatus('📐 Click 3 points to measure angle');
+  } else if(tool==='measure-poly'){
+    measureMode='polyline';
+    document.getElementById('measure-info').classList.remove('hidden');
+    setStatus('〰️ Click points, double-click to finish polyline');
+  }
+
+  if(tool==='select'){
     document.getElementById('measurements').classList.add('hidden');
   }
 };
@@ -299,12 +427,252 @@ container.addEventListener('click',e=>{
     } else deselectAll();
   } else if(currentTool==='rect-cut'||currentTool==='circle-cut'||currentTool==='line-cut'){
     handleShapeClick();
+  } else if(measureMode){
+    handleMeasureClick();
   }
 });
 
-// ============ SHAPE CREATION (JMesh snap-to-surface) ============
-function handleShapeClick(){
+// ============ MEASUREMENT HANDLING ============
+function handleMeasureClick(){
   const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+
+  const point=hits[0].point.clone();
+  measurePoints.push(point);
+
+  // Add visual marker (small yellow sphere)
+  const markerGeo=new THREE.SphereGeometry(1.5,12,12);
+  const markerMat=new THREE.MeshBasicMaterial({color:0xffcc00});
+  const marker=new THREE.Mesh(markerGeo,markerMat);
+  marker.position.copy(point);
+  scene.add(marker);
+  measurePointMarkers.push(marker);
+
+  if(measureMode==='distance'&&measurePoints.length===2){
+    createDistanceMeasurement(measurePoints[0],measurePoints[1]);
+    measurePoints=[];
+    measurePointMarkers.forEach(m=>scene.remove(m));
+    measurePointMarkers=[];
+  } else if(measureMode==='angle'&&measurePoints.length===3){
+    createAngleMeasurement(measurePoints[0],measurePoints[1],measurePoints[2]);
+    measurePoints=[];
+    measurePointMarkers.forEach(m=>scene.remove(m));
+    measurePointMarkers=[];
+  } else if(measureMode==='polyline'){
+    // Draw line segment to previous point
+    if(measurePoints.length>=2){
+      const prev=measurePoints[measurePoints.length-2];
+      const curr=measurePoints[measurePoints.length-1];
+      const lineGeo=new THREE.BufferGeometry().setFromPoints([prev,curr]);
+      const lineMat=new THREE.LineBasicMaterial({color:0xffcc00,linewidth:2});
+      const line=new THREE.Line(lineGeo,lineMat);
+      scene.add(line);
+      measurePointMarkers.push(line);
+    }
+  }
+
+  setStatus(`📏 ${measurePoints.length} point(s) placed`);
+}
+
+function finalizeMeasurePoints(){
+  if(measureMode==='polyline'&&measurePoints.length>=2){
+    // Calculate total length
+    let totalLen=0;
+    for(let i=1;i<measurePoints.length;i++){
+      totalLen+=measurePoints[i-1].distanceTo(measurePoints[i]);
+    }
+    const midIdx=Math.floor(measurePoints.length/2);
+    const labelPos=measurePoints[midIdx].clone();
+    labelPos.y+=10;
+    const label=createLabel(`${totalLen.toFixed(1)}mm`,labelPos);
+    scene.add(label);
+
+    measurements.push({
+      type:'polyline',
+      points:[...measurePoints],
+      objects:[...measurePointMarkers,label],
+      value:totalLen
+    });
+    updateMeasureInfoPanel();
+  }
+
+  // Clean up temp markers
+  measurePointMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  measurePointMarkers=[];
+  measurePoints=[];
+}
+
+function createDistanceMeasurement(p1,p2){
+  const dist=p1.distanceTo(p2);
+
+  // Line
+  const lineGeo=new THREE.BufferGeometry().setFromPoints([p1,p2]);
+  const lineMat=new THREE.LineBasicMaterial({color:0xffcc00,linewidth:2});
+  const line=new THREE.Line(lineGeo,lineMat);
+  scene.add(line);
+
+  // Endpoints
+  const sGeo=new THREE.SphereGeometry(1.5,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xffcc00});
+  const s1=new THREE.Mesh(sGeo,sMat);s1.position.copy(p1);scene.add(s1);
+  const s2=new THREE.Mesh(sGeo,sMat);s2.position.copy(p2);scene.add(s2);
+
+  // Label at midpoint
+  const mid=p1.clone().add(p2).multiplyScalar(0.5);
+  mid.y+=8;
+  const label=createLabel(`${dist.toFixed(1)} mm`,mid);
+  scene.add(label);
+
+  measurements.push({
+    type:'distance',
+    points:[p1.clone(),p2.clone()],
+    objects:[line,s1,s2,label],
+    value:dist
+  });
+  updateMeasureInfoPanel();
+  setStatus(`📏 Distance: ${dist.toFixed(1)} mm`);
+}
+
+function createAngleMeasurement(p1,vertex,p3){
+  const v1=p1.clone().sub(vertex).normalize();
+  const v2=p3.clone().sub(vertex).normalize();
+  const angleRad=Math.acos(Math.max(-1,Math.min(1,v1.dot(v2))));
+  const angleDeg=angleRad*180/Math.PI;
+
+  // Lines
+  const lineGeo1=new THREE.BufferGeometry().setFromPoints([vertex,p1]);
+  const lineGeo2=new THREE.BufferGeometry().setFromPoints([vertex,p3]);
+  const lineMat=new THREE.LineBasicMaterial({color:0xff6600,linewidth:2});
+  const line1=new THREE.Line(lineGeo1,lineMat);scene.add(line1);
+  const line2=new THREE.Line(lineGeo2,lineMat);scene.add(line2);
+
+  // Points
+  const sGeo=new THREE.SphereGeometry(1.5,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xff6600});
+  [p1,vertex,p3].forEach(p=>{const s=new THREE.Mesh(sGeo,sMat);s.position.copy(p);scene.add(s)});
+
+  // Label at vertex
+  const labelPos=vertex.clone();
+  labelPos.y+=10;
+  const label=createLabel(`${angleDeg.toFixed(1)}°`,labelPos);
+  scene.add(label);
+
+  // Arc visualization
+  const arcPoints=[];
+  const arcSegments=24;
+  for(let i=0;i<=arcSegments;i++){
+    const t=i/arcSegments;
+    const pt=v1.clone().lerp(v2,t).normalize().multiplyScalar(15).add(vertex);
+    arcPoints.push(pt);
+  }
+  const arcGeo=new THREE.BufferGeometry().setFromPoints(arcPoints);
+  const arcMat=new THREE.LineBasicMaterial({color:0xff6600,linewidth:2});
+  const arc=new THREE.Line(arcGeo,arcMat);scene.add(arc);
+
+  measurements.push({
+    type:'angle',
+    points:[p1.clone(),vertex.clone(),p3.clone()],
+    objects:[line1,line2,arc,label],
+    value:angleDeg
+  });
+  updateMeasureInfoPanel();
+  setStatus(`📐 Angle: ${angleDeg.toFixed(1)}°`);
+}
+
+function createLabel(text,position){
+  const div=document.createElement('div');
+  div.textContent=text;
+  div.style.cssText='background:rgba(0,0,0,0.8);color:#ffcc00;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:600;pointer-events:none';
+  const label=new CSS2DObject(div);
+  label.position.copy(position);
+  return label;
+}
+
+function updateMeasureInfoPanel(){
+  const list=document.getElementById('measure-list');
+  list.innerHTML=measurements.map((m,i)=>{
+    if(m.type==='distance')return `<div class="measure-entry"><span class="label">📏 Distance #${i+1}</span><br><span class="value">${m.value.toFixed(1)} mm</span></div>`;
+    if(m.type==='angle')return `<div class="measure-entry"><span class="label">📐 Angle #${i+1}</span><br><span class="value">${m.value.toFixed(1)}°</span></div>`;
+    if(m.type==='polyline')return `<div class="measure-entry"><span class="label">〰️ Polyline #${i+1} (${m.points.length} pts)</span><br><span class="value">${m.value.toFixed(1)} mm</span></div>`;
+    return '';
+  }).join('');
+}
+
+window.clearMeasurements=function(){
+  measurements.forEach(m=>m.objects.forEach(o=>{if(o.parent)o.parent.remove(o)}));
+  measurements=[];
+  measurePoints=[];
+  measurePointMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  measurePointMarkers=[];
+  updateMeasureInfoPanel();
+  document.getElementById('measure-info').classList.add('hidden');
+  setStatus('Measurements cleared');
+};
+
+// ============ PLANNING OBJECTS ============
+window.createPlanningObj=function(type){
+  const center=new THREE.Vector3(0,0,0);
+  if(objects.length>0){
+    // Place near selected or scene center
+    if(selectedIdx>=0){
+      const box=new THREE.Box3().setFromObject(objects[selectedIdx].mesh);
+      center.copy(box.getCenter(new THREE.Vector3()));
+    }
+  }
+
+  let mesh,name;
+  if(type==='plane'){
+    const geo=new THREE.PlaneGeometry(80,80);
+    const mat=new THREE.MeshBasicMaterial({color:PLAN_COLORS.plane,transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false});
+    mesh=new THREE.Mesh(geo,mat);
+    const edges=new THREE.EdgesGeometry(geo);
+    const wire=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0xff6666}));
+    mesh.add(wire);
+    name='Osteotomy Plane';
+    mesh.rotation.x=-Math.PI/2;
+  } else if(type==='screw'){
+    const geo=new THREE.CylinderGeometry(1.5,1.5,30,16);
+    const mat=new THREE.MeshStandardMaterial({color:PLAN_COLORS.screw,roughness:0.3,metalness:0.7});
+    mesh=new THREE.Mesh(geo,mat);
+    // Add thread lines
+    const threadGeo=new THREE.CylinderGeometry(1.8,1.8,30,8,1,false);
+    const threadMat=new THREE.MeshBasicMaterial({color:0x666677,wireframe:true,transparent:true,opacity:0.3});
+    mesh.add(new THREE.Mesh(threadGeo,threadMat));
+    name='Screw 3×30mm';
+    mesh.position.copy(center);
+    mesh.position.z+=20;
+  } else if(type==='kwire'){
+    const geo=new THREE.CylinderGeometry(0.75,0.75,80,8);
+    const mat=new THREE.MeshStandardMaterial({color:PLAN_COLORS.kwire,roughness:0.2,metalness:0.8});
+    mesh=new THREE.Mesh(geo,mat);
+    name='K-Wire 1.5mm';
+    mesh.position.copy(center);
+    mesh.position.z+=40;
+  } else if(type==='cylinder'){
+    const geo=new THREE.CylinderGeometry(5,5,40,24);
+    const mat=new THREE.MeshBasicMaterial({color:PLAN_COLORS.cylinder,transparent:true,opacity:0.3,side:THREE.DoubleSide,depthWrite:false});
+    mesh=new THREE.Mesh(geo,mat);
+    const edges=new THREE.EdgesGeometry(geo);
+    const wire=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0x88aacc}));
+    mesh.add(wire);
+    name='Cylinder Ø10×40mm';
+    mesh.position.copy(center);
+    mesh.position.y+=30;
+  }
+
+  if(mesh){
+    scene.add(mesh);
+    objects.push({mesh,name,color:PLAN_COLORS[type]||0x888888,origPos:mesh.position.clone(),visible:true,transparent:true,type,caseId:null});
+    selectObject(objects.length-1);
+    updateBoneList();
+    setStatus(`Created ${name}`);
+  }
+};
+
+// ============ SHAPE CREATION ============
+function handleShapeClick(){
+  const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
   const hits=raycaster.intersectObjects(meshes,false);
   if(hits.length===0)return;
 
@@ -334,7 +702,6 @@ function createShapeVisual(){
   } else if(shapeType==='circle'){
     geo=new THREE.CircleGeometry(r,32);
   } else {
-    // Line: thin rectangle
     geo=new THREE.PlaneGeometry(w,2);
   }
 
@@ -345,18 +712,15 @@ function createShapeVisual(){
   activeShape=new THREE.Mesh(geo,mat);
   activeShape.position.copy(shapeOrigin);
 
-  // Orient shape to face the surface normal
   const up=new THREE.Vector3(0,0,1);
   const quat=new THREE.Quaternion().setFromUnitVectors(up,shapeNormal);
   activeShape.quaternion.copy(quat);
 
-  // Add wireframe outline
   const edges=new THREE.EdgesGeometry(geo);
   const lineMat=new THREE.LineBasicMaterial({color:0xff6666,linewidth:2});
   const wireframe=new THREE.LineSegments(edges,lineMat);
   activeShape.add(wireframe);
 
-  // Add extrusion volume (transparent box showing the cut depth)
   const depthGeo=new THREE.BoxGeometry(
     shapeType==='rect'?w:2*r,
     shapeType==='rect'?h:2*r,
@@ -370,7 +734,6 @@ function createShapeVisual(){
   depthMesh.position.z=-extrudeDepth/2;
   activeShape.add(depthMesh);
 
-  // Add normal direction arrow
   const arrowDir=shapeNormal.clone().normalize();
   const arrowOrigin=shapeOrigin.clone();
   const arrow=new THREE.ArrowHelper(arrowDir,arrowOrigin,30,0xff0000,8,4);
@@ -378,7 +741,7 @@ function createShapeVisual(){
   activeShape.userData.arrow=arrow;
 
   scene.add(activeShape);
-  updateMeasurements();
+  updateMeasurementsOverlay();
 }
 
 function clearShapeVisual(){
@@ -395,12 +758,10 @@ window.clearShape=function(){
   clearShapeVisual();
   shapeOrigin=null;
   shapeNormal=null;
-  shapePoints=[];
   document.getElementById('measurements').classList.add('hidden');
   setStatus('Shape cleared');
 };
 
-// ============ SHAPE PARAMETER UPDATE ============
 window.updateShapeParam=function(){
   document.getElementById('shape-width-val').textContent=document.getElementById('shape-width').value;
   document.getElementById('shape-height-val').textContent=document.getElementById('shape-height').value;
@@ -409,10 +770,10 @@ window.updateShapeParam=function(){
   document.getElementById('snap-offset-val').textContent=document.getElementById('snap-offset').value;
   extrudeDepth=parseFloat(document.getElementById('shape-depth').value)||50;
   if(activeShape&&shapeOrigin)createShapeVisual();
-  updateMeasurements();
+  updateMeasurementsOverlay();
 };
 
-function updateMeasurements(){
+function updateMeasurementsOverlay(){
   const el=document.getElementById('measurements');
   const text=document.getElementById('measure-text');
   if(!activeShape||!shapeOrigin){el.classList.add('hidden');return;}
@@ -430,14 +791,14 @@ function updateMeasurements(){
   }
 }
 
-// ============ SHAPE TRANSFORM (G/R/E like JMesh) ============
+// ============ KEYBOARD ============
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;
 
-  // Shape-specific keys
+  // Shape transform keys
   if(activeShape&&shapeOrigin){
     if(e.key==='g'||e.key==='G'){isMovingShape=!isMovingShape;isRotatingShape=false;isExtrudingShape=false;
-      setStatus(isMovingShape?'Moving shape — click to place, or use axis keys (X/Y/Z)':'Shape locked');return;}
+      setStatus(isMovingShape?'Moving shape — click to place, or use axis keys':'Shape locked');return;}
     if(e.key==='r'||e.key==='R'){isRotatingShape=!isRotatingShape;isMovingShape=false;isExtrudingShape=false;
       setStatus(isRotatingShape?'Rotating shape — use mouse wheel or arrow keys':'Shape locked');return;}
     if(e.key==='e'||e.key==='E'){isExtrudingShape=!isExtrudingShape;isMovingShape=false;isRotatingShape=false;
@@ -452,11 +813,11 @@ document.addEventListener('keydown',e=>{
       if(e.key==='ArrowUp'){extrudeDepth=Math.min(200,extrudeDepth+5);
         document.getElementById('shape-depth').value=extrudeDepth;
         document.getElementById('shape-depth-val').textContent=extrudeDepth;
-        createShapeVisual();updateMeasurements();return;}
+        createShapeVisual();updateMeasurementsOverlay();return;}
       if(e.key==='ArrowDown'){extrudeDepth=Math.max(1,extrudeDepth-5);
         document.getElementById('shape-depth').value=extrudeDepth;
         document.getElementById('shape-depth-val').textContent=extrudeDepth;
-        createShapeVisual();updateMeasurements();return;}
+        createShapeVisual();updateMeasurementsOverlay();return;}
     }
     if(isRotatingShape){
       if(e.key==='ArrowUp'){rotateShape(15);return;}
@@ -472,11 +833,22 @@ document.addEventListener('keydown',e=>{
     case '2':setTool('rect-cut');break;
     case '3':setTool('circle-cut');break;
     case '4':setTool('line-cut');break;
-    case 'g':case 'G':setGizmo('translate');break;
+    case 'd':case 'D':setTool('measure-dist');break;
+    case 'a':case 'A':setTool('measure-angle');break;
+    case 'p':case 'P':setTool('measure-poly');break;
+    case 'g':case 'G':if(!activeShape)setGizmo('translate');break;
     case 'Enter':executeSlice();break;
-    case 'Escape':if(activeShape){clearShape();}else{deselectAll();}break;
+    case 'Escape':
+      if(activeShape){clearShape();}
+      else if(measurePoints.length>0){finalizeMeasurePoints();}
+      else{deselectAll();}
+      break;
     case 'Delete':case 'Backspace':deleteSelected();e.preventDefault();break;
-    case 'f':case 'F':if(selectedIdx>=0){orbit.target.copy(objects[selectedIdx].mesh.position);}break;
+    case 'f':case 'F':
+      if(selectedIdx>=0){
+        animateCameraToObject(objects[selectedIdx]);
+      }
+      break;
     case 'd':if(e.ctrlKey||e.metaKey){duplicateSelected();e.preventDefault();}break;
     case 'm':case 'M':mirrorSelected();break;
   }
@@ -491,7 +863,6 @@ container.addEventListener('mousemove',e=>{
     mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
     raycaster.setFromCamera(mouse,camera);
 
-    // Project mouse onto the shape's plane
     const plane=new THREE.Plane(shapeNormal.clone(),-shapeOrigin.dot(shapeNormal));
     const target=new THREE.Vector3();
     raycaster.ray.intersectPlane(plane,target);
@@ -518,7 +889,6 @@ function rotateShape(deg,axis){
   if(axis==='y'){
     activeShape.rotateOnWorldAxis(shapeNormal.clone().normalize(),rad);
   } else {
-    // Get a perpendicular axis
     const perp=new THREE.Vector3(1,0,0);
     if(Math.abs(shapeNormal.dot(perp))>0.9)perp.set(0,1,0);
     const rotAxis=perp.cross(shapeNormal).normalize();
@@ -530,7 +900,7 @@ function rotateShape(deg,axis){
   }
 }
 
-// ============ EXECUTE SLICE (Boolean Slice like JMesh) ============
+// ============ EXECUTE SLICE ============
 window.executeSlice=async function(){
   if(!activeShape||!shapeOrigin||!shapeNormal){
     setStatus('Place a cutting shape first (tools 2-4)');
@@ -597,13 +967,15 @@ function addFragment(meshData,color,name,cId){
 // ============ OBJECT MANAGEMENT ============
 window.selectObject=function(idx){
   if(selectedIdx>=0&&selectedIdx<objects.length){
-    objects[selectedIdx].mesh.material.emissive.setHex(0x000000);
+    objects[selectedIdx].mesh.material.emissive?.setHex(0x000000);
   }
   selectedIdx=idx;
   if(idx>=0&&idx<objects.length){
     const o=objects[idx];
-    o.mesh.material.emissive.setHex(0x1a3a5a);
-    o.mesh.material.emissiveIntensity=0.4;
+    if(o.mesh.material.emissive){
+      o.mesh.material.emissive.setHex(0x1a3a5a);
+      o.mesh.material.emissiveIntensity=0.4;
+    }
     gizmo.attach(o.mesh);
     document.getElementById('transform-section').style.display='block';
     document.getElementById('selected-name').textContent=o.name;
@@ -639,15 +1011,43 @@ window.duplicateSelected=function(){
   if(selectedIdx<0)return;const src=objects[selectedIdx];
   const clone=src.mesh.clone();clone.material=src.mesh.material.clone();clone.position.x+=20;
   clone.name=src.name+'_copy';scene.add(clone);
-  objects.push({mesh:clone,name:clone.name,color:src.color,origPos:clone.position.clone(),visible:true,transparent:false,caseId:src.caseId});
+  objects.push({mesh:clone,name:clone.name,color:src.color,origPos:clone.position.clone(),visible:true,transparent:src.transparent,caseId:src.caseId,type:src.type});
   selectObject(objects.length-1);updateBoneList();
 };
 window.mirrorSelected=function(){
   if(selectedIdx<0)return;const src=objects[selectedIdx];
   const mirror=src.mesh.clone();mirror.material=src.mesh.material.clone();mirror.scale.x*=-1;
   mirror.name=src.name+'_mirror';scene.add(mirror);
-  objects.push({mesh:mirror,name:mirror.name,color:src.color,origPos:mirror.position.clone(),visible:true,transparent:false,caseId:src.caseId});
+  objects.push({mesh:mirror,name:mirror.name,color:src.color,origPos:mirror.position.clone(),visible:true,transparent:src.transparent,caseId:src.caseId,type:src.type});
   selectObject(objects.length-1);updateBoneList();
+};
+
+// Toggle visibility
+window.toggleVis=function(idx){
+  const o=objects[idx];
+  o.visible=!o.visible;
+  o.mesh.visible=o.visible;
+  updateBoneList();
+};
+
+// Rename
+window.startRename=function(idx,e){
+  e.stopPropagation();
+  const o=objects[idx];
+  const span=e.target;
+  const input=document.createElement('input');
+  input.value=o.name;
+  input.className='bone-name';
+  input.style.cssText='background:#1a1a2a;border:1px solid #4a9aff;color:#e0e0e0;font-size:12px;padding:2px 4px;border-radius:3px;width:100%';
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  const finish=()=>{
+    o.name=input.value||o.name;
+    updateBoneList();
+  };
+  input.addEventListener('blur',finish);
+  input.addEventListener('keydown',ev=>{if(ev.key==='Enter'){finish();}if(ev.key==='Escape'){updateBoneList();}});
 };
 
 function updateBoneList(){
@@ -655,7 +1055,13 @@ function updateBoneList(){
   el.innerHTML=objects.map((o,i)=>{
     const sel=i===selectedIdx?'selected':'';
     const hex='#'+o.color.toString(16).padStart(6,'0');
-    return `<div class="bone-item ${sel}" onclick="selectObject(${i})"><div class="bone-color" style="background:${hex}"></div><span style="flex:1">${o.name}</span></div>`;
+    const icon=o.type==='plane'?'✂️':o.type==='screw'?'🔩':o.type==='kwire'?'📌':o.type==='cylinder'?'🔧':'🦴';
+    const visClass=o.visible?'':'hidden-bone';
+    return `<div class="bone-item ${sel}" onclick="selectObject(${i})">
+      <div class="bone-color" style="background:${hex}"></div>
+      <span class="bone-vis ${visClass}" onclick="toggleVis(${i});event.stopPropagation()">${o.visible?'👁':'🚫'}</span>
+      <span class="bone-name" ondblclick="startRename(${i},event)">${icon} ${o.name}</span>
+    </div>`;
   }).join('');
   document.getElementById('obj-count').textContent=objects.length+' objects';
 }
@@ -738,7 +1144,7 @@ window.uploadDicom=function(){
     loading.classList.add("hidden");
   };
 
-  xhr.timeout=600000; // 10 minutes
+  xhr.timeout=600000;
   console.log("[upload] Sending "+files.length+" files via XHR...");
   xhr.send(fd);
 };
@@ -784,13 +1190,33 @@ function fitCamera(){
 
 function setStatus(msg){document.getElementById('status-text').textContent=msg;}
 
+// ============ CAMERA ANIMATION ============
+function updateCameraAnimation(){
+  if(!cameraAnim)return;
+  cameraAnim.progress+=0.05;
+  const t=Math.min(1,cameraAnim.progress);
+  const ease=1-Math.pow(1-t,3); // ease-out cubic
+
+  camera.position.lerpVectors(cameraAnim.posFrom,cameraAnim.posTo,ease);
+  orbit.target.lerpVectors(cameraAnim.targetFrom,cameraAnim.targetTo,ease);
+
+  if(t>=1)cameraAnim=null;
+}
+
 // ============ RESIZE & RENDER ============
 window.addEventListener('resize',()=>{
   camera.aspect=container.clientWidth/container.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth,container.clientHeight);
+  labelRenderer.setSize(container.clientWidth,container.clientHeight);
 });
-function animate(){requestAnimationFrame(animate);orbit.update();renderer.render(scene,camera);}
+function animate(){
+  requestAnimationFrame(animate);
+  orbit.update();
+  updateCameraAnimation();
+  renderer.render(scene,camera);
+  labelRenderer.render(scene,camera);
+}
 animate();
 document.getElementById('loading').classList.add('hidden');
 setStatus('Ready — upload DICOM or STL to begin');
