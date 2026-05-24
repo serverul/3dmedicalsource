@@ -16,7 +16,7 @@ from PIL import Image
 from scipy.spatial import cKDTree
 from scipy.ndimage import binary_closing, binary_opening, binary_dilation, binary_erosion, label as ndi_label
 from skimage import measure
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
