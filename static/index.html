@@ -171,8 +171,9 @@ canvas{display:block}
       <div class="tool-group">
         <div class="tool-btn" data-tool="place-cora" onclick="setTool('place-cora')">📍 Place CORA</div>
         <div class="tool-btn" data-tool="draw-axis" onclick="setTool('draw-axis')">📏 Draw Axis</div>
-        <div class="tool-btn" data-tool="aca-free" onclick="setTool('aca-free')">📐 ACA Free</div>
+        <div class="tool-btn" data-tool="aa-free" onclick="setTool('aa-free')">📏 Asse Anatomico</div>
         <div class="tool-btn" data-tool="joint-line" onclick="setTool('joint-line')">🦿 Joint Line</div>
+        <div class="tool-btn" data-tool="set-aca" onclick="setTool('set-aca')">🔄 Set ACA</div>
       </div>
       <div class="tool-group">
         <div class="tool-btn" onclick="rotateAroundCORA(15)" style="background:#2a2a4a;color:#aaf">↻ +15°</div>
@@ -322,8 +323,8 @@ canvas{display:block}
       <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
       <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
       <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
-      <kbd>C</kbd> CORA &nbsp; <kbd>X</kbd> ACA Free &nbsp; <kbd>J</kbd> Joint &nbsp; <kbd>7/8/9</kbd> Rule 1/2/3<br>
-      <kbd>Del</kbd> Delete &nbsp; <kbd>F</kbd> Focus &nbsp; <kbd>DblClick</kbd> Center
+      <kbd>C</kbd> CORA &nbsp; <kbd>R</kbd> ACA &nbsp; <kbd>X</kbd> Asse Anatomico &nbsp; <kbd>J</kbd> Joint<br>
+      <kbd>7/8/9</kbd> Rule 1/2/3 &nbsp; <kbd>Del</kbd> Del &nbsp; <kbd>F</kbd> Focus
     </div>
 
     <div id="loading"><div class="spinner"></div><div>Loading...</div><div id="load-progress"></div></div>
@@ -411,6 +412,10 @@ let moveAxis=null;
 let coraPoint=null; // THREE.Vector3 - the CORA position
 let coraMarker=null; // THREE.Group - visual marker
 let coraAxes=null; // THREE.Group - axis lines
+let acaDirection=null; // THREE.Vector3 - ACA direction (rotation axis)
+let acaLine=null; // THREE.Line - ACA visualization
+let acaSetPoints=[]; // for 2-point ACA definition
+let acaSetMarkers=[]; // temporary markers
 let anatAxes=[]; // {points:[p1,p2], objects:[], label} - drawn anatomical axes
 let coraHistory=[]; // {originalPos, originalRot} for undo
 
@@ -534,14 +539,18 @@ window.setTool=function(tool){
     measureMode='anat-axis';
     document.getElementById('measurements').classList.remove('hidden');
     setStatus('📏 Click 2 points to draw an anatomical axis');
-  } else if(tool==='aca-free'){
-    measureMode='aca-free';
+  } else if(tool==='aa-free'){
+    measureMode='aa-free';
     document.getElementById('measurements').classList.remove('hidden');
-    setStatus('📐 Click to place ACA start, then click to set direction. Drag to move.');
+    setStatus('📏 Click to place Anatomic Axis start, then click to set direction');
   } else if(tool==='joint-line'){
     measureMode='joint-line';
     document.getElementById('measurements').classList.remove('hidden');
     setStatus('🦿 Click 2 points on joint surface to draw orientation line');
+  } else if(tool==='set-aca'){
+    measureMode='set-aca';
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('🔄 Click 2 points to define ACA direction (or use axis selector), then click on bone to place at CORA');
   }
 
   if(tool==='select'){
@@ -568,8 +577,10 @@ container.addEventListener('click',e=>{
     handleShapeClick();
   } else if(currentTool==='place-cora'){
     handlePlaceCORA();
-  } else if(measureMode==='aca-free'){
-    handleACAFreeClick();
+  } else if(measureMode==='set-aca'){
+    handleSetACAClick();
+  } else if(measureMode==='aa-free'){
+    handleAAFreeClick();
   } else if(measureMode==='joint-line'){
     handleJointLineClick();
   } else if(measureMode==='anat-axis'){
@@ -776,13 +787,13 @@ window.clearMeasurements=function(){
   jointLineMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
   jointLineMarkers=[];
   updateJointAngles();
-  // Clear ACA axes
-  acaAxes.forEach(a=>a.objects.forEach(o=>{if(o.parent)scene.remove(o)}));
-  acaAxes=[];
-  acaFreePoints=[];
-  acaFreeMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
-  acaFreeMarkers=[];
-  activeAcaIdx=-1;
+  // Clear Anatomic Axes
+  aaAxes.forEach(a=>a.objects.forEach(o=>{if(o.parent)scene.remove(o)}));
+  aaAxes=[];
+  aaFreePoints=[];
+  aaFreeMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  aaFreeMarkers=[];
+  activeAaIdx=-1;
   updatePaleyVisualization();
   updateMeasureInfoPanel();
   document.getElementById('measure-info').classList.add('hidden');
@@ -1891,15 +1902,15 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// ============ ACA FREE POSITIONING + PALEY RULES ============
-let acaAxes=[]; // {name, origin, direction, length, objects:[], paleyRule}
-let acaFreePoints=[];
-let acaFreeMarkers=[];
-let activeAcaIdx=-1; // which ACA is selected for manipulation
+// ============ ANATOMIC AXIS (AA) FREE POSITIONING + PALEY RULES ============
+let aaAxes=[]; // {name, origin, direction, length, objects:[], paleyRule}
+let aaFreePoints=[];
+let aaFreeMarkers=[];
+let activeAaIdx=-1; // which AA is selected for manipulation
 let isDraggingAca=false;
 let paleyRule=1;
 
-const ACA_COLORS=[0x00ffcc,0xff00cc,0xccff00,0x00ccff,0xff6600,0x6600ff];
+const AA_COLORS=[0x00ffcc,0xff00cc,0xccff00,0x00ccff,0xff6600,0x6600ff];
 
 window.setPaleyRule=function(rule){
   paleyRule=rule;
@@ -1907,45 +1918,45 @@ window.setPaleyRule=function(rule){
     b.classList.toggle('active',parseInt(b.dataset.rule)===rule);
   });
   const descs={
-    1:'Rule 1: Osteotomy at CORA → simple angular rotation only',
-    2:'Rule 2: Osteotomy away from CORA → angular correction + translation needed',
-    3:'Rule 3: Multi-level deformity → multiple osteotomies or combined correction'
+    1:'Rule 1: Osteotomy at CORA level → simple angular rotation',
+    2:'Rule 2: Osteotomy away from CORA → angle + translation',
+    3:'Rule 3: Multi-level → multiple osteotomies'
   };
   document.getElementById('paley-rule-desc').textContent=descs[rule];
   updatePaleyVisualization();
 };
 
-function handleACAFreeClick(){
+function handleAAFreeClick(){
   const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
   const hits=raycaster.intersectObjects(meshes,false);
   const point=hits.length>0?hits[0].point.clone():null;
 
-  if(acaFreePoints.length===0){
+  if(aaFreePoints.length===0){
     // First click: place start point
-    if(!point){setStatus('📐 Click on bone surface to place ACA start');return;}
-    acaFreePoints.push(point);
+    if(!point){setStatus('📏 Click on bone surface to place Anatomic Axis start');return;}
+    aaFreePoints.push(point);
     const sGeo=new THREE.SphereGeometry(2.5,12,12);
     const sMat=new THREE.MeshBasicMaterial({color:0x00ffcc});
     const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
-    acaFreeMarkers.push(s);
-    setStatus('📐 Now click to set direction (or click on another bone point)');
+    aaFreeMarkers.push(s);
+    setStatus('📏 Now click to set direction (or click on another bone point)');
   } else {
     // Second click: set direction
-    const start=acaFreePoints[0];
+    const start=aaFreePoints[0];
     const end=point||start.clone().add(new THREE.Vector3(0,0,100)); // if no hit, extend in Z
     const dir=end.clone().sub(start).normalize();
-    createACAAxis(start,dir);
-    acaFreePoints=[];
-    acaFreeMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
-    acaFreeMarkers=[];
+    createAAAxis(start,dir);
+    aaFreePoints=[];
+    aaFreeMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+    aaFreeMarkers=[];
     setTool('select');
   }
 }
 
-function createACAAxis(origin,direction){
-  const idx=acaAxes.length;
-  const color=ACA_COLORS[idx%ACA_COLORS.length];
-  const name=`ACA${idx+1}`;
+function createAAAxis(origin,direction){
+  const idx=aaAxes.length;
+  const color=AA_COLORS[idx%AA_COLORS.length];
+  const name=`AA${idx+1}`;
   const length=300;
 
   // Extended line in both directions
@@ -1984,28 +1995,28 @@ function createACAAxis(origin,direction){
   }
 
   // Label
-  const label=createLabel(`${name} (Rule ${paleyRule})`,origin.clone().add(new THREE.Vector3(0,12,0)));
+  const label=createLabel(`AA${idx+1} (Rule ${paleyRule})`,origin.clone().add(new THREE.Vector3(0,12,0)));
   scene.add(label);
 
   const objs=[line,arrow,marker,label,...ticks];
-  acaAxes.push({name,origin:origin.clone(),direction:direction.clone(),length,objects:objs,paleyRule,color,idx});
+  aaAxes.push({name,origin:origin.clone(),direction:direction.clone(),length,objects:objs,paleyRule,color,idx});
 
   // If we have 2+ axes, auto-find CORA
-  if(acaAxes.length>=2){
-    const a=acaAxes[acaAxes.length-2],b=acaAxes[acaAxes.length-1];
+  if(aaAxes.length>=2){
+    const a=aaAxes[aaAxes.length-2],b=aaAxes[aaAxes.length-1];
     const intersection=findLineIntersection(a.origin,a.origin.clone().add(a.direction),b.origin,b.origin.clone().add(b.direction));
     if(intersection){
       setCORA(intersection);
-      setStatus(`📐 ${name} placed — CORA found at intersection! (Rule ${paleyRule})`);
+      setStatus(`📏 AA${idx+1} placed — CORA found at intersection! (Rule ${paleyRule})`);
     } else {
-      setStatus(`📐 ${name} placed (parallel axes, no CORA intersection)`);
+      setStatus(`📏 AA${idx+1} placed (parallel axes, no CORA intersection)`);
     }
   } else {
-    setStatus(`📐 ${name} placed — draw another axis to find CORA`);
+    setStatus(`📏 AA${idx+1} placed — draw another axis to find CORA`);
   }
 
   updatePaleyVisualization();
-  activeAcaIdx=acaAxes.length-1;
+  activeAaIdx=aaAxes.length-1;
 }
 
 function updatePaleyVisualization(){
@@ -2014,8 +2025,8 @@ function updatePaleyVisualization(){
 
   let html=`<div style="margin-bottom:4px;color:#4a9aff">Active: Rule ${paleyRule}</div>`;
 
-  acaAxes.forEach((a,i)=>{
-    html+=`<div style="margin-bottom:2px"><span style="color:#${a.color.toString(16).padStart(6,'0')}">●</span> ${a.name} — Rule ${a.paleyRule} — (${a.origin.x.toFixed(0)},${a.origin.y.toFixed(0)},${a.origin.z.toFixed(0)})</div>`;
+  aaAxes.forEach((a,i)=>{
+    html+=`<div style="margin-bottom:2px"><span style="color:#${a.color.toString(16).padStart(6,'0')}">●</span> AA${a.idx+1} — Rule ${a.paleyRule} — (${a.origin.x.toFixed(0)},${a.origin.y.toFixed(0)},${a.origin.z.toFixed(0)})</div>`;
   });
 
   if(coraPoint){
@@ -2034,18 +2045,204 @@ function updatePaleyVisualization(){
   list.innerHTML=html;
 }
 
-// Keyboard shortcut for ACA Free
+// Keyboard shortcut for Anatomic Axis
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   if(e.key==='x'||e.key==='X'){
     if(!e.ctrlKey&&!e.metaKey&&!isMovingShape&&!isRotatingShape&&!isExtrudingShape){
-      setTool('aca-free');
+      setTool('aa-free');
     }
   }
   // Number keys for Paley rules
   if(e.key==='7'&&currentTool==='select')setPaleyRule(1);
   if(e.key==='8'&&currentTool==='select')setPaleyRule(2);
   if(e.key==='9'&&currentTool==='select')setPaleyRule(3);
+});
+
+// ============ ACA (Anatomical Correction Axis) ============
+// The ACA is the rotation axis at the CORA point.
+// It passes through CORA and is perpendicular to the deformity plane.
+
+function handleSetACAClick(){
+  const meshes=objects.filter(o=>!o.transparent).map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  const point=hits.length>0?hits[0].point.clone():null;
+
+  // Method 1: Use axis selector (preset directions)
+  const axisSelect=document.getElementById('cora-axis');
+  if(axisSelect&&axisSelect.value!=='custom'&&acaSetPoints.length===0){
+    // Quick mode: set ACA from axis selector
+    let dir;
+    switch(axisSelect.value){
+      case 'x': dir=new THREE.Vector3(1,0,0);break;
+      case 'y': dir=new THREE.Vector3(0,1,0);break;
+      case 'z': dir=new THREE.Vector3(0,0,1);break;
+      default: dir=new THREE.Vector3(0,0,1);
+    }
+    if(!coraPoint){
+      // Place CORA at click point first
+      if(point)setCORA(point);
+      else{setStatus('🔄 Click on bone to place CORA first');return;}
+    }
+    setACA(dir);
+    setTool('select');
+    return;
+  }
+
+  // Method 2: Click 2 points to define ACA direction
+  if(!point){setStatus('🔄 Click on bone surface');return;}
+  acaSetPoints.push(point);
+
+  const sGeo=new THREE.SphereGeometry(2,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xff00ff});
+  const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
+  acaSetMarkers.push(s);
+
+  if(acaSetPoints.length===2){
+    const dir=acaSetPoints[1].clone().sub(acaSetPoints[0]).normalize();
+    // Place CORA at midpoint if not set
+    if(!coraPoint){
+      setCORA(acaSetPoints[0].clone().add(acaSetPoints[1]).multiplyScalar(0.5));
+    }
+    setACA(dir);
+    // Clean up temp markers
+    acaSetMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+    acaSetMarkers=[];
+    acaSetPoints=[];
+    setTool('select');
+  } else {
+    setStatus('🔄 Click second point to define ACA direction');
+  }
+}
+
+function setACA(direction){
+  acaDirection=direction.clone().normalize();
+  if(!coraPoint){setStatus('🔄 Place CORA first');return;}
+
+  // Remove old ACA line
+  if(acaLine){scene.remove(acaLine);acaLine=null;}
+
+  // Draw ACA as a prominent line through CORA
+  const length=80;
+  const p1=coraPoint.clone().sub(acaDirection.clone().multiplyScalar(length));
+  const p2=coraPoint.clone().add(acaDirection.clone().multiplyScalar(length));
+
+  const lineGeo=new THREE.BufferGeometry().setFromPoints([p1,p2]);
+  const lineMat=new THREE.LineBasicMaterial({color:0xff00ff,linewidth:3,transparent:true,opacity:0.8});
+  acaLine=new THREE.Line(lineGeo,lineMat);
+  scene.add(acaLine);
+
+  // Add rotation direction arrows (curved arrows around ACA)
+  const arrowLen=15;
+  const arrow1=new THREE.ArrowHelper(acaDirection,p1,arrowLen*2,0xff00ff,8,4);
+  scene.add(arrow1);
+  const arrow2=new THREE.ArrowHelper(acaDirection.clone().negate(),p2,arrowLen*2,0xff00ff,8,4);
+  scene.add(arrow2);
+
+  // Store arrows for cleanup
+  if(!acaLine.userData.arrows)acaLine.userData.arrows=[];
+  acaLine.userData.arrows=[arrow1,arrow2];
+
+  // Add perpendicular ring to show rotation plane
+  const perp1=new THREE.Vector3().crossVectors(acaDirection,new THREE.Vector3(0,1,0)).normalize();
+  if(perp1.length()<0.1)perp1.crossVectors(acaDirection,new THREE.Vector3(1,0,0)).normalize();
+  const perp2=new THREE.Vector3().crossVectors(acaDirection,perp1).normalize();
+
+  const ringPts=[];
+  for(let i=0;i<=32;i++){
+    const angle=(i/32)*Math.PI*2;
+    const pt=coraPoint.clone()
+      .add(perp1.clone().multiplyScalar(Math.cos(angle)*20))
+      .add(perp2.clone().multiplyScalar(Math.sin(angle)*20));
+    ringPts.push(pt);
+  }
+  const ringGeo=new THREE.BufferGeometry().setFromPoints(ringPts);
+  const ringMat=new THREE.LineBasicMaterial({color:0xff00ff,transparent:true,opacity:0.3});
+  const ring=new THREE.Line(ringGeo,ringMat);
+  scene.add(ring);
+  if(!acaLine.userData.extras)acaLine.userData.extras=[];
+  acaLine.userData.extras.push(ring);
+
+  // Label
+  const labelPos=coraPoint.clone().add(acaDirection.clone().multiplyScalar(40)).add(new THREE.Vector3(0,8,0));
+  const label=createLabel(`ACA (${acaDirection.x.toFixed(2)}, ${acaDirection.y.toFixed(2)}, ${acaDirection.z.toFixed(2)})`,labelPos);
+  scene.add(label);
+  if(!acaLine.userData.extras)acaLine.userData.extras=[];
+  acaLine.userData.extras.push(label);
+
+  // Update CORA status
+  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — ACA set`;
+  document.getElementById('cora-status').style.color='#ff00ff';
+  setStatus(`🔄 ACA set at CORA — direction (${acaDirection.x.toFixed(2)}, ${acaDirection.y.toFixed(2)}, ${acaDirection.z.toFixed(2)})`);
+}
+
+// Override rotateAroundCORA to use ACA if set
+const _origRotateAroundCORA=window.rotateAroundCORA;
+window.rotateAroundCORA=function(deg,reset){
+  if(selectedIdx<0){setStatus('Select a bone first');return;}
+  if(!coraPoint){setStatus('Place CORA first');return;}
+
+  const obj=objects[selectedIdx];
+  const mesh=obj.mesh;
+
+  if(reset){
+    if(obj._coraOriginal){
+      mesh.position.copy(obj._coraOriginal.pos);
+      mesh.rotation.copy(obj._coraOriginal.rot);
+    }
+    setStatus('⟲ Reset to original position');
+    return;
+  }
+
+  if(!obj._coraOriginal){
+    obj._coraOriginal={pos:mesh.position.clone(),rot:mesh.rotation.clone()};
+  }
+
+  const angleInput=document.getElementById('cora-angle');
+  if(angleInput&&deg!==0){
+    deg=parseFloat(angleInput.value)||deg;
+    if(deg<0)deg=-Math.abs(deg);
+    else deg=Math.abs(deg);
+  }
+
+  // Use ACA direction if set, otherwise fall back to axis selector
+  let rotAxis;
+  if(acaDirection){
+    rotAxis=acaDirection.clone();
+  } else {
+    const axisSelect=document.getElementById('cora-axis');
+    if(axisSelect){
+      switch(axisSelect.value){
+        case 'x': rotAxis=new THREE.Vector3(1,0,0);break;
+        case 'y': rotAxis=new THREE.Vector3(0,1,0);break;
+        case 'z': rotAxis=new THREE.Vector3(0,0,1);break;
+        default: rotAxis=new THREE.Vector3(0,0,1);
+      }
+    } else {
+      rotAxis=new THREE.Vector3(0,0,1);
+    }
+  }
+
+  const rad=THREE.MathUtils.degToRad(deg);
+  const relPos=mesh.position.clone().sub(coraPoint);
+  relPos.applyAxisAngle(rotAxis,rad);
+  mesh.position.copy(coraPoint.clone().add(relPos));
+  mesh.rotateOnWorldAxis(rotAxis,rad);
+  gizmo.attach(mesh);
+
+  const axisLabel=acaDirection?'ACA':document.getElementById('cora-axis')?.value||'Z';
+  document.getElementById('cora-status').textContent=`CORA: (${coraPoint.x.toFixed(1)}, ${coraPoint.y.toFixed(1)}, ${coraPoint.z.toFixed(1)}) — ${deg.toFixed(1)}° around ${axisLabel}`;
+  setStatus(`↻ Rotated ${deg.toFixed(1)}° around ${axisLabel} at CORA`);
+};
+
+// Add keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='r'||e.key==='R'){
+    if(!e.ctrlKey&&!e.metaKey&&!isMovingShape&&!isRotatingShape&&!isExtrudingShape&&currentTool==='select'){
+      setTool('set-aca');
+    }
+  }
 });
 
 // ============ JOINT ORIENTATION LINES (Paley) ============
