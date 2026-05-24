@@ -2696,6 +2696,111 @@ def measure_bone_length(
     }
 
 
+
+
+@app.post("/api/measure-diameter")
+async def measure_diameter(
+    case_id: str = Form(...),
+    bone_index: int = Form(...),
+    point: str = Form(...),        # JSON [x,y,z]
+    normal: str = Form(...),       # JSON [nx,ny,nz]
+    max_sample_dist: float = Form(default=5.0),
+):
+    """Measure the diameter of a bone at a given point along a plane perpendicular to the normal.
+    
+    Projects nearby vertices onto the cutting plane and finds the maximum distance between them.
+    """
+    try:
+        pt = np.array(json.loads(point), dtype=float)
+        nm = np.array(json.loads(normal), dtype=float)
+    except Exception:
+        raise HTTPException(400, "invalid point/normal JSON")
+
+    case_dir = UPLOADS / case_id
+    bone_path = case_dir / "bones" / f"bone_{bone_index}.stl"
+    if not bone_path.exists():
+        bone_path = case_dir / f"bone_{bone_index}.stl"
+    if not bone_path.exists():
+        raise HTTPException(404, "Bone mesh not found")
+
+    mesh = trimesh.load(str(bone_path), force="mesh")
+    verts = mesh.vertices
+
+    # Plane equation: normal . (v - point) = 0
+    nm_norm = nm / (np.linalg.norm(nm) + 1e-12)
+    dists = np.abs((verts - pt) @ nm_norm)
+    mask = dists < max_sample_dist
+    projected = verts[mask] - np.outer(dists[mask], nm_norm)
+
+    if len(projected) < 3:
+        raise HTTPException(400, "Not enough vertices near the cutting plane")
+
+    # Find the two farthest projected points (approximate diameter)
+    from scipy.spatial import ConvexHull
+    try:
+        # Project to 2D in the plane basis
+        u = np.cross(nm_norm, [0, 0, 1])
+        if np.linalg.norm(u) < 0.1:
+            u = np.cross(nm_norm, [0, 1, 0])
+        u = u / np.linalg.norm(u)
+        v = np.cross(nm_norm, u)
+        coords_2d = np.column_stack([(projected - pt) @ u, (projected - pt) @ v])
+        hull = ConvexHull(coords_2d)
+        hull_pts = projected[hull.vertices]
+        # Find max pairwise distance on hull
+        from scipy.spatial.distance import cdist
+        dist_matrix = cdist(hull_pts, hull_pts)
+        idx = np.unravel_index(np.argmax(dist_matrix), dist_matrix.shape)
+        p1 = hull_pts[idx[0]].tolist()
+        p2 = hull_pts[idx[1]].tolist()
+        diameter = float(dist_matrix[idx])
+    except Exception:
+        # Fallback: brute force on projected points
+        max_d = 0
+        p1 = projected[0].tolist()
+        p2 = projected[1].tolist()
+        for i in range(len(projected)):
+            for j in range(i + 1, len(projected)):
+                d = np.linalg.norm(projected[i] - projected[j])
+                if d > max_d:
+                    max_d = d
+                    p1 = projected[i].tolist()
+                    p2 = projected[j].tolist()
+        diameter = max_d
+
+    return {
+        "diameter_mm": round(diameter, 2),
+        "radius_mm": round(diameter / 2, 2),
+        "point_a": p1,
+        "point_b": p2,
+        "center": ((np.array(p1) + np.array(p2)) / 2).tolist(),
+    }
+
+
+@app.post("/api/surface-line")
+async def surface_line(points: list[list[float]] = Body(...)):
+    """Calculate total length of a line on a bone surface (sequence of 3D points).
+    
+    This is the same as polyline but named to match BonaPlanner's surface line feature.
+    """
+    if len(points) < 2:
+        return {"total_length_mm": 0.0, "segment_count": 0, "segments": []}
+    
+    segments = []
+    total = 0.0
+    pts = [np.array(p) for p in points]
+    for i in range(1, len(pts)):
+        seg_len = float(np.linalg.norm(pts[i] - pts[i - 1]))
+        total += seg_len
+        segments.append(round(seg_len, 2))
+    
+    return {
+        "total_length_mm": round(total, 2),
+        "segment_count": len(points) - 1,
+        "segments": segments,
+    }
+
+
 # ─── Export per-fragment STL endpoint ─────────────────────────────────────────
 
 @app.post("/api/export-fragment-stl")

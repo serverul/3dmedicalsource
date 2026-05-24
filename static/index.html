@@ -130,6 +130,8 @@ canvas{display:block}
         <div class="tool-btn" data-tool="measure-dist" onclick="setTool('measure-dist')">📏 Distance</div>
         <div class="tool-btn" data-tool="measure-angle" onclick="setTool('measure-angle')">📐 Angle</div>
         <div class="tool-btn" data-tool="measure-poly" onclick="setTool('measure-poly')">〰️ Polyline</div>
+        <div class="tool-btn" data-tool="measure-diam" onclick="setTool('measure-diam')">⭕ Diameter</div>
+        <div class="tool-btn" data-tool="measure-surface" onclick="setTool('measure-surface')">〰 Surface</div>
       </div>
       <div class="tool-group">
         <div class="tool-btn" onclick="clearMeasurements()" style="background:#3a2a2a;color:#f66">🗑 Clear All</div>
@@ -144,6 +146,41 @@ canvas{display:block}
         <div class="tool-btn" onclick="createPlanningObj('screw')">🔩 Screw</div>
         <div class="tool-btn" onclick="createPlanningObj('kwire')">📌 K-Wire</div>
         <div class="tool-btn" onclick="createPlanningObj('cylinder')">🔧 Cylinder</div>
+        <div class="tool-btn" onclick="createPlanningObj('sphere')">🔮 Sphere</div>
+        <div class="tool-btn" onclick="createPlanningObj('tube')">🪵 Tube (TPLO)</div>
+      </div>
+    </div>
+
+    <!-- Alignment -->
+    <div class="section">
+      <label>🎯 Alignment</label>
+      <div class="tool-group">
+        <div class="tool-btn" data-tool="align-pts" onclick="setTool('align-pts')">📍 Point Align</div>
+        <div class="tool-btn" data-tool="align-planes" onclick="setTool('align-planes')">📐 Plane Align</div>
+      </div>
+      <div class="tool-group">
+        <div class="tool-btn" onclick="executeAlignment()" style="background:#2a3a5a;color:#6af">✅ Apply</div>
+        <div class="tool-btn" onclick="clearAlignPoints()" style="background:#3a2a2a;color:#f66">🗑</div>
+      </div>
+      <div id="align-status" style="font-size:10px;color:#666;margin-top:4px"></div>
+    </div>
+
+    <!-- Undo/Redo -->
+    <div class="section">
+      <label>↩️ History</label>
+      <div class="section-row">
+        <button onclick="doUndo()" style="background:#2a2a4a;border-color:#3a3a6a">↩ Undo</button>
+        <button onclick="doRedo()" style="background:#2a2a4a;border-color:#3a3a6a">↪ Redo</button>
+      </div>
+      <div id="history-status" style="font-size:10px;color:#666;margin-top:4px"></div>
+    </div>
+
+    <!-- Groups -->
+    <div class="section">
+      <label>📦 Groups</label>
+      <div class="section-row">
+        <button onclick="groupSelected()" style="background:#2a3a2a;border-color:#3a5a3a">Group</button>
+        <button onclick="ungroupSelected()" style="background:#3a2a2a;border-color:#5a3a3a">Ungroup</button>
       </div>
     </div>
 
@@ -223,7 +260,7 @@ canvas{display:block}
 
     <div id="hotkeys">
       <kbd>1</kbd> Select &nbsp; <kbd>2</kbd> Rect &nbsp; <kbd>3</kbd> Circle &nbsp; <kbd>4</kbd> Line<br>
-      <kbd>D</kbd> Distance &nbsp; <kbd>A</kbd> Angle &nbsp; <kbd>P</kbd> Polyline<br>
+      <kbd>D</kbd> Distance &nbsp; <kbd>A</kbd> Angle &nbsp; <kbd>P</kbd> Polyline &nbsp; <kbd>U</kbd> Diameter<br>
       <kbd>G</kbd> Move plane &nbsp; <kbd>R</kbd> Rotate plane<br>
       <kbd>E</kbd> Extrude &nbsp; <kbd>↑↓</kbd> Adjust extrude<br>
       <kbd>Enter</kbd> Slice &nbsp; <kbd>Esc</kbd> Clear/Cancel<br>
@@ -323,6 +360,7 @@ let cameraAnim=null; // {from, to, targetFrom, targetTo, progress}
 // ============ DOUBLE-CLICK CENTER ============
 container.addEventListener('dblclick',e=>{
   if(gizmo.dragging)return;
+  if(measureMode==='surface-line'){finalizeSurfaceLine();return;}
   const rect=renderer.domElement.getBoundingClientRect();
   mouse.x=((e.clientX-rect.left)/rect.width)*2-1;
   mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
@@ -405,6 +443,24 @@ window.setTool=function(tool){
     setStatus('〰️ Click points, double-click to finish polyline');
   }
 
+  if(tool==='measure-diam'){
+    measureMode='diameter';
+    document.getElementById('measure-info').classList.remove('hidden');
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('⭕ Click on bone surface to measure diameter');
+  } else if(tool==='measure-surface'){
+    measureMode='surface-line';
+    surfaceLinePoints=[];
+    surfaceLineObjs=[];
+    document.getElementById('measure-info').classList.remove('hidden');
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('〰 Click points on bone surface, double-click to finish');
+  } else if(tool==='align-pts'||tool==='align-planes'){
+    measureMode='align';
+    document.getElementById('measurements').classList.remove('hidden');
+    setStatus('🎯 Click alignment points (3 source + 3 target)');
+  }
+
   if(tool==='select'){
     document.getElementById('measurements').classList.add('hidden');
   }
@@ -427,6 +483,12 @@ container.addEventListener('click',e=>{
     } else deselectAll();
   } else if(currentTool==='rect-cut'||currentTool==='circle-cut'||currentTool==='line-cut'){
     handleShapeClick();
+  } else if(measureMode==='diameter'){
+    handleDiameterClick();
+  } else if(measureMode==='surface-line'){
+    handleSurfaceLineClick();
+  } else if(measureMode==='align'){
+    handleAlignClick();
   } else if(measureMode){
     handleMeasureClick();
   }
@@ -595,6 +657,8 @@ function updateMeasureInfoPanel(){
     if(m.type==='distance')return `<div class="measure-entry"><span class="label">📏 Distance #${i+1}</span><br><span class="value">${m.value.toFixed(1)} mm</span></div>`;
     if(m.type==='angle')return `<div class="measure-entry"><span class="label">📐 Angle #${i+1}</span><br><span class="value">${m.value.toFixed(1)}°</span></div>`;
     if(m.type==='polyline')return `<div class="measure-entry"><span class="label">〰️ Polyline #${i+1} (${m.points.length} pts)</span><br><span class="value">${m.value.toFixed(1)} mm</span></div>`;
+    if(m.type==='diameter')return `<div class="measure-entry"><span class="label">⭕ Diameter #${i+1}</span><br><span class="value">Ø${m.value.toFixed(1)} mm</span></div>`;
+    if(m.type==='surface-line')return `<div class="measure-entry"><span class="label">〰 Surface #${i+1} (${m.points.length} pts)</span><br><span class="value">${m.value.toFixed(1)} mm</span></div>`;
     return '';
   }).join('');
 }
@@ -605,6 +669,9 @@ window.clearMeasurements=function(){
   measurePoints=[];
   measurePointMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
   measurePointMarkers=[];
+  surfaceLinePoints=[];
+  surfaceLineObjs.forEach(m=>{if(m.parent)scene.remove(m)});
+  surfaceLineObjs=[];
   updateMeasureInfoPanel();
   document.getElementById('measure-info').classList.add('hidden');
   setStatus('Measurements cleared');
@@ -836,6 +903,7 @@ document.addEventListener('keydown',e=>{
     case 'd':case 'D':setTool('measure-dist');break;
     case 'a':case 'A':setTool('measure-angle');break;
     case 'p':case 'P':setTool('measure-poly');break;
+    case 'u':case 'U':setTool('measure-diam');break;
     case 'g':case 'G':if(!activeShape)setGizmo('translate');break;
     case 'Enter':executeSlice();break;
     case 'Escape':
@@ -1189,6 +1257,300 @@ function fitCamera(){
 }
 
 function setStatus(msg){document.getElementById('status-text').textContent=msg;}
+
+// ============ DIAMETER MEASUREMENT ============
+function handleDiameterClick(){
+  const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const hit=hits[0];
+  const point=hit.point.clone();
+  const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+
+  // Create a plane perpendicular to the surface normal at the click point
+  const plane=new THREE.Plane(normal,-point.dot(normal));
+
+  // Sample the mesh surface along the plane to find diameter
+  // Project nearby vertices onto the plane and find the spread
+  const geom=hit.object.geometry;
+  const posAttr=geom.getAttribute('position');
+  const matrixWorld=hit.object.matrixWorld;
+  const projected=[];
+
+  for(let i=0;i<posAttr.count;i++){
+    const v=new THREE.Vector3(posAttr.getX(i),posAttr.getY(i),posAttr.getZ(i));
+    v.applyMatrix4(matrixWorld);
+    const dist=Math.abs(plane.distanceToPoint(v));
+    if(dist<5.0){ // within 5mm of the plane
+      const proj=v.clone().sub(normal.clone().multiplyScalar(plane.distanceToPoint(v)));
+      projected.push(proj);
+    }
+  }
+
+  if(projected.length<3){setStatus('⭕ Not enough surface data for diameter');return;}
+
+  // Find the two farthest projected points (approximate diameter)
+  let maxDist=0,p1=point,p2=point;
+  for(let i=0;i<projected.length;i++){
+    for(let j=i+1;j<projected.length;j++){
+      const d=projected[i].distanceTo(projected[j]);
+      if(d>maxDist){maxDist=d;p1=projected[i];p2=projected[j];}
+    }
+  }
+
+  // Draw
+  const lineGeo=new THREE.BufferGeometry().setFromPoints([p1,p2]);
+  const lineMat=new THREE.LineBasicMaterial({color:0x00ffcc,linewidth:2});
+  const line=new THREE.Line(lineGeo,lineMat);scene.add(line);
+
+  const sGeo=new THREE.SphereGeometry(1.5,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0x00ffcc});
+  const s1=new THREE.Mesh(sGeo,sMat);s1.position.copy(p1);scene.add(s1);
+  const s2=new THREE.Mesh(sGeo,sMat);s2.position.copy(p2);scene.add(s2);
+
+  // Draw circle at the plane intersection
+  const mid=p1.clone().add(p2).multiplyScalar(0.5);
+  const radius=maxDist/2;
+  const circleGeo=new THREE.RingGeometry(radius-0.3,radius+0.3,48);
+  const circleMat=new THREE.MeshBasicMaterial({color:0x00ffcc,transparent:true,opacity:0.15,side:THREE.DoubleSide,depthWrite:false});
+  const circle=new THREE.Mesh(circleGeo,circleMat);
+  circle.position.copy(mid);
+  const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+  circle.quaternion.copy(q);
+  scene.add(circle);
+
+  const labelPos=mid.clone().add(normal.clone().multiplyScalar(5));
+  const label=createLabel(`Ø${maxDist.toFixed(1)} mm`,labelPos);
+  scene.add(label);
+
+  measurements.push({type:'diameter',points:[p1,p2],objects:[line,s1,s2,circle,label],value:maxDist});
+  updateMeasureInfoPanel();
+  setStatus(`⭕ Diameter: ${maxDist.toFixed(1)} mm`);
+}
+
+// ============ SURFACE LINE MEASUREMENT ============
+let surfaceLinePoints=[];
+let surfaceLineObjs=[];
+
+function handleSurfaceLineClick(){
+  const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const point=hits[0].point.clone();
+  surfaceLinePoints.push(point);
+
+  const sGeo=new THREE.SphereGeometry(1.5,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xff99ff});
+  const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
+  surfaceLineObjs.push(s);
+
+  if(surfaceLinePoints.length>=2){
+    const prev=surfaceLinePoints[surfaceLinePoints.length-2];
+    const curr=surfaceLinePoints[surfaceLinePoints.length-1];
+    const lineGeo=new THREE.BufferGeometry().setFromPoints([prev,curr]);
+    const lineMat=new THREE.LineBasicMaterial({color:0xff99ff,linewidth:2});
+    const line=new THREE.Line(lineGeo,lineMat);scene.add(line);
+    surfaceLineObjs.push(line);
+  }
+  setStatus(`〰 Surface: ${surfaceLinePoints.length} pts — dblclick to finish`);
+}
+
+function finalizeSurfaceLine(){
+  if(surfaceLinePoints.length<2){surfaceLinePoints=[];return;}
+  let totalLen=0;
+  for(let i=1;i<surfaceLinePoints.length;i++){
+    totalLen+=surfaceLinePoints[i-1].distanceTo(surfaceLinePoints[i]);
+  }
+  const midIdx=Math.floor(surfaceLinePoints.length/2);
+  const labelPos=surfaceLinePoints[midIdx].clone();labelPos.y+=8;
+  const label=createLabel(`${totalLen.toFixed(1)} mm`,labelPos);scene.add(label);
+  surfaceLineObjs.push(label);
+  measurements.push({type:'surface-line',points:[...surfaceLinePoints],objects:[...surfaceLineObjs],value:totalLen});
+  updateMeasureInfoPanel();
+  setStatus(`〰 Surface line: ${totalLen.toFixed(1)} mm`);
+  surfaceLinePoints=[];
+  surfaceLineObjs=[];
+}
+
+// ============ PLANNING OBJECTS: SPHERE + TUBE ============
+const origCreatePlanningObj = window.createPlanningObj;
+window.createPlanningObj=function(type){
+  const center=new THREE.Vector3(0,0,0);
+  if(objects.length>0 && selectedIdx>=0){
+    const box=new THREE.Box3().setFromObject(objects[selectedIdx].mesh);
+    center.copy(box.getCenter(new THREE.Vector3()));
+  }
+
+  if(type==='sphere'){
+    const geo=new THREE.SphereGeometry(10,32,32);
+    const mat=new THREE.MeshBasicMaterial({color:0x44aaff,transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false});
+    const mesh=new THREE.Mesh(geo,mat);
+    const edges=new THREE.EdgesGeometry(geo);
+    mesh.add(new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0x66ccff})));
+    mesh.position.copy(center);
+    mesh.position.y+=15;
+    scene.add(mesh);
+    objects.push({mesh,name:'Sphere Ø20mm',color:0x44aaff,origPos:mesh.position.clone(),visible:true,transparent:true,type:'sphere',caseId:null});
+    selectObject(objects.length-1);updateBoneList();setStatus('Created Sphere');
+    return;
+  }
+  if(type==='tube'){
+    // TPLO tube: outer cylinder with inner hole
+    const outerR=8,innerR=5,height=40;
+    const outerGeo=new THREE.CylinderGeometry(outerR,outerR,height,32,1,true);
+    const innerGeo=new THREE.CylinderGeometry(innerR,innerR,height,32,1,true);
+    const mat=new THREE.MeshBasicMaterial({color:0xaa8844,transparent:true,opacity:0.25,side:THREE.DoubleSide,depthWrite:false});
+    const outerMesh=new THREE.Mesh(outerGeo,mat);
+    const edges=new THREE.EdgesGeometry(outerGeo);
+    outerMesh.add(new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0xccaa66})));
+    // Also add inner surface
+    const innerMat=new THREE.MeshBasicMaterial({color:0xaa8844,transparent:true,opacity:0.1,side:THREE.DoubleSide,depthWrite:false});
+    const innerMesh=new THREE.Mesh(innerGeo,innerMat);
+    outerMesh.add(innerMesh);
+    // Top/bottom rings
+    const ringGeo=new THREE.RingGeometry(innerR,outerR,32);
+    const ringMat=new THREE.MeshBasicMaterial({color:0xaa8844,transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false});
+    const topRing=new THREE.Mesh(ringGeo,ringMat);topRing.position.y=height/2;topRing.rotation.x=-Math.PI/2;outerMesh.add(topRing);
+    const botRing=new THREE.Mesh(ringGeo.clone(),ringMat.clone());botRing.position.y=-height/2;botRing.rotation.x=Math.PI/2;outerMesh.add(botRing);
+
+    outerMesh.position.copy(center);
+    outerMesh.position.y+=30;
+    scene.add(outerMesh);
+    objects.push({mesh:outerMesh,name:'Tube Ø16/10×40mm',color:0xaa8844,origPos:outerMesh.position.clone(),visible:true,transparent:true,type:'tube',caseId:null});
+    selectObject(objects.length-1);updateBoneList();setStatus('Created TPLO Tube');
+    return;
+  }
+  // Fall through to original for plane, screw, kwire, cylinder
+  origCreatePlanningObj(type);
+};
+
+// ============ ALIGNMENT TOOL ============
+let alignPoints=[];
+let alignMarkers=[];
+
+function clearAlignPoints(){
+  alignPoints=[];
+  alignMarkers.forEach(m=>{if(m.parent)scene.remove(m)});
+  alignMarkers=[];
+  document.getElementById('align-status').textContent='';
+  setStatus('Alignment points cleared');
+}
+window.clearAlignPoints=clearAlignPoints;
+
+function handleAlignClick(){
+  const meshes=objects.map(o=>o.mesh);
+  const hits=raycaster.intersectObjects(meshes,false);
+  if(hits.length===0)return;
+  const hit=hits[0];
+  const point=hit.point.clone();
+  const meshIdx=objects.findIndex(o=>o.mesh===hit.object);
+  alignPoints.push({point,meshIdx});
+
+  const sGeo=new THREE.SphereGeometry(2,12,12);
+  const sMat=new THREE.MeshBasicMaterial({color:0xff44ff});
+  const s=new THREE.Mesh(sGeo,sMat);s.position.copy(point);scene.add(s);
+  alignMarkers.push(s);
+
+  // Number label
+  const label=createLabel(`${alignPoints.length}`,point.clone().add(new THREE.Vector3(0,8,0)));
+  scene.add(label);alignMarkers.push(label);
+
+  document.getElementById('align-status').textContent=`${alignPoints.length}/6 points (3 src + 3 dst)`;
+  setStatus(`📍 Align point ${alignPoints.length}/6 — need 3 source + 3 target points`);
+}
+
+window.executeAlignment=function(){
+  if(alignPoints.length<6){
+    setStatus('⚠️ Need 6 points: first 3 = source, last 3 = target');
+    return;
+  }
+  const src=alignPoints.slice(0,3).map(p=>p.point);
+  const dst=alignPoints.slice(3,6).map(p=>p.point);
+  const srcMeshIdx=alignPoints[0].meshIdx;
+
+  // Compute rigid transform (centroid + rotation via SVD approximation)
+  const srcCenter=src[0].clone().add(src[1]).add(src[2]).multiplyScalar(1/3);
+  const dstCenter=dst[0].clone().add(dst[1]).add(dst[2]).multiplyScalar(1/3);
+
+  // Compute rotation using cross-covariance approach
+  const srcPts=src.map(p=>p.clone().sub(srcCenter));
+  const dstPts=dst.map(p=>p.clone().sub(dstCenter));
+
+  // Build 3x3 covariance matrix H
+  const H=new THREE.Matrix3();
+  for(let i=0;i<3;i++){
+    const s=srcPts[i],d=dstPts[i];
+    H.elements[0]+=s.x*d.x; H.elements[1]+=s.x*d.y; H.elements[2]+=s.x*d.z;
+    H.elements[3]+=s.y*d.x; H.elements[4]+=s.y*d.y; H.elements[5]+=s.y*d.z;
+    H.elements[6]+=s.z*d.x; H.elements[7]+=s.z*d.y; H.elements[8]+=s.z*d.z;
+  }
+
+  // Use quaternion-based rotation estimation
+  // For simplicity, use the cross product approach for 3-point alignment
+  const srcNormal=srcPts[1].clone().cross(srcPts[2]).normalize();
+  const dstNormal=dstPts[1].clone().cross(dstPts[2]).normalize();
+  const q1=new THREE.Quaternion().setFromUnitVectors(srcNormal,dstNormal);
+
+  // Apply to the source mesh
+  if(srcMeshIdx>=0 && srcMeshIdx<objects.length){
+    const mesh=objects[srcMeshIdx].mesh;
+    mesh.position.sub(srcCenter);
+    mesh.applyQuaternion(q1);
+    mesh.position.add(dstCenter);
+    objects[srcMeshIdx].origPos=mesh.position.clone();
+  }
+
+  clearAlignPoints();
+  setStatus('✅ Alignment applied');
+};
+
+// ============ UNDO / REDO ============
+window.doUndo=async function(){
+  if(!caseId){setStatus('No case loaded');return;}
+  try{
+    const resp=await fetch(`/api/cases/${caseId}/undo`,{method:'POST'});
+    const data=await resp.json();
+    document.getElementById('history-status').textContent=data.message||'Undo done';
+    setStatus('↩ Undo: '+(data.message||'done'));
+  }catch(e){setStatus('Undo error: '+e.message);}
+};
+
+window.doRedo=async function(){
+  if(!caseId){setStatus('No case loaded');return;}
+  try{
+    const resp=await fetch(`/api/cases/${caseId}/redo`,{method:'POST'});
+    const data=await resp.json();
+    document.getElementById('history-status').textContent=data.message||'Redo done';
+    setStatus('↪ Redo: '+(data.message||'done'));
+  }catch(e){setStatus('Redo error: '+e.message);}
+};
+
+// ============ GROUPS ============
+let groups=[];
+window.groupSelected=function(){
+  // Group all visible objects into a named group
+  const visibleObjs=objects.filter(o=>o.visible);
+  if(visibleObjs.length<2){setStatus('Need at least 2 visible objects to group');return;}
+  const groupId=groups.length;
+  const group={id:groupId,name:`Group ${groupId+1}`,objectIndices:objects.map((o,i)=>o.visible?i:-1).filter(i=>i>=0)};
+  groups.push(group);
+  objects.forEach((o,i)=>{
+    if(o.visible)o.groupId=groupId;
+  });
+  updateBoneList();
+  setStatus(`📦 Grouped ${group.objectIndices.length} objects`);
+};
+
+window.ungroupSelected=function(){
+  if(selectedIdx<0)return;
+  const o=objects[selectedIdx];
+  if(o.groupId===undefined){setStatus('Object not in a group');return;}
+  const gid=o.groupId;
+  objects.forEach(obj=>{if(obj.groupId===gid)delete obj.groupId;});
+  groups=groups.filter(g=>g.id!==gid);
+  updateBoneList();
+  setStatus('📦 Ungrouped');
+};
 
 // ============ CAMERA ANIMATION ============
 function updateCameraAnimation(){
