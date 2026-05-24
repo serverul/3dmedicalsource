@@ -1292,32 +1292,53 @@ def dicom_to_bone_meshes(
         if slice_mask.any():
             src[z] = binary_fill_holes(slice_mask).astype(np.float32)
 
-        # ========== CONNECTED COMPONENTS BONE SEPARATION ==========
-    # Simple approach: find connected components in the binary mask.
-    # Each connected component = one bone. No watershed needed.
-    # Bones are naturally separated by soft tissue in CT.
+        # ========== WATERSHED WITH EROSION-BASED SEEDS ==========
+    # Watershed naturally separates bones at joints (narrow points).
+    # Seeds are created by eroding the mask — erosion breaks at joints.
+    # This gives clean anatomical separation without over-segmentation.
 
-    print(f"[bones] Finding connected components on {src.shape} volume...")
+    print(f"[watershed] Computing distance transform on {src.shape} volume...")
+    dist_transform = distance_transform_edt(src > 0.5, sampling=spacing)
 
-    # Light morphological closing to fill small gaps within bones
-    from scipy.ndimage import binary_closing, generate_binary_structure, gaussian_filter
-    struct_close = generate_binary_structure(3, 1)  # 6-connectivity
-    src_binary = binary_closing(src > 0.5, structure=struct_close, iterations=2)
+    # Create seeds via moderate erosion
+    # 3-4 voxels: enough to break joints, not enough to split bones
+    erosion_voxels = max(3, separation_erosion)
+    struct_erode = np.ones((2 * erosion_voxels + 1,) * 3, dtype=np.uint8)
+    eroded = binary_erosion(src > 0.5, structure=struct_erode)
 
-    # Find connected components
-    labels, num_components = ndi_label(src_binary)
-    print(f"[bones] Found {num_components} connected components")
+    # Find connected components on eroded mask = one seed per bone
+    markers, num_markers = ndi_label(eroded)
+    print(f"[watershed] Erosion ({erosion_voxels} voxels) → {num_markers} seeds")
+
+    # If too many seeds, keep largest ones
+    if num_markers > max_bones:
+        print(f"[watershed] Too many seeds ({num_markers}), keeping top {max_bones}")
+        seed_volumes = []
+        for sid in range(1, num_markers + 1):
+            seed_volumes.append((sid, float((markers == sid).sum())))
+        seed_volumes.sort(key=lambda x: x[1], reverse=True)
+        new_markers = np.zeros_like(markers)
+        for new_id, (old_id, _) in enumerate(seed_volumes[:max_bones], 1):
+            new_markers[markers == old_id] = new_id
+        markers = new_markers
+        num_markers = min(num_markers, max_bones)
+
+    # Run watershed on negative distance transform
+    print(f"[watershed] Running watershed with {num_markers} seeds...")
+    labels = sk_watershed(-dist_transform, markers, mask=(src > 0.5))
+    num_bones = labels.max()
+    print(f"[watershed] Produced {num_bones} bone regions")
 
     # Extract volumes
     voxel_volume = float(spacing[0] * spacing[1] * spacing[2])
     bone_list = []
 
-    for bone_id in range(1, num_components + 1):
+    for bone_id in range(1, num_bones + 1):
         bone_mask = (labels == bone_id).astype(np.float32)
         bone_volume = float(bone_mask.sum()) * voxel_volume
 
         if bone_volume < min_bone_volume_mm3:
-            print(f"[bones] Skipping component {bone_id}: volume {bone_volume:.0f} mm³ < {min_bone_volume_mm3}")
+            print(f"[watershed] Skipping region {bone_id}: volume {bone_volume:.0f} mm³ < {min_bone_volume_mm3}")
             continue
 
         # Fill holes in this specific bone
@@ -1342,7 +1363,7 @@ def dicom_to_bone_meshes(
                 allow_degenerate=False,
             )
         except Exception as e:
-            print(f"[bones] Marching cubes failed for component {bone_id}: {e}")
+            print(f"[watershed] Marching cubes failed for region {bone_id}: {e}")
             continue
 
         # Convert to x,y,z
@@ -1381,21 +1402,21 @@ def dicom_to_bone_meshes(
                 normalize_coordinates=True,
             )
 
-        print(f"[bones] Component {bone_id}: {len(bone_mesh.vertices)} verts, {len(bone_mesh.faces)} faces, vol={bone_volume:.0f} mm³")
+        print(f"[watershed] Bone {bone_id}: {len(bone_mesh.vertices)} verts, {len(bone_mesh.faces)} faces, vol={bone_volume:.0f} mm³")
         bone_list.append((f"bone_{len(bone_list)}", bone_mesh, bone_volume))
 
     # Sort by volume descending
     bone_list.sort(key=lambda x: x[2], reverse=True)
     bone_list = bone_list[:max_bones]
     num_bones = len(bone_list)
-    print(f"[bones] Final: {num_bones} bones extracted")
+    print(f"[watershed] Final: {num_bones} bones extracted")
     # Build result
 
     smoothed_bones = [(name, bm) for name, bm, _ in bone_list]
 
     meta["bone_count"] = len(smoothed_bones)
     meta["auto_threshold"] = auto_info
-    meta["separation_method"] = "connected_components"
+    meta["separation_method"] = "watershed_erosion"
     
     meta["bones"] = []
     for name, bm in smoothed_bones:
