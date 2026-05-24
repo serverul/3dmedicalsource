@@ -376,7 +376,10 @@ orbit.enableDamping=true;orbit.dampingFactor=0.08;
 const gizmo=new TransformControls(camera,renderer.domElement);
 gizmo.setMode('translate');gizmo.setSize(0.8);
 scene.add(gizmo);
-gizmo.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value});
+gizmo.addEventListener('dragging-changed',e=>{
+  orbit.enabled=!e.value;
+  if(e.value===true){_captureUndoState('Transform');}
+});
 gizmo.addEventListener('objectChange',()=>{
   if(selectedIdx>=0&&selectedIdx<objects.length){
     const o=objects[selectedIdx];
@@ -1042,6 +1045,15 @@ document.addEventListener('keydown',e=>{
       break;
     case 'd':if(e.ctrlKey||e.metaKey){duplicateSelected();e.preventDefault();}break;
     case 'm':case 'M':mirrorSelected();break;
+    case 'z':
+      if(e.ctrlKey||e.metaKey){
+        e.preventDefault();
+        if(e.shiftKey){doRedo();}else{doUndo();}
+      }
+      break;
+    case 'y':
+      if(e.ctrlKey||e.metaKey){e.preventDefault();doRedo();}
+      break;
   }
 });
 
@@ -1193,7 +1205,9 @@ window.resetTransform=function(){
   document.getElementById('tx').value=0;document.getElementById('ty').value=0;document.getElementById('tz').value=0;
 };
 window.deleteSelected=function(){
-  if(selectedIdx<0)return;const o=objects[selectedIdx];
+  if(selectedIdx<0)return;
+  _captureUndoState('Delete');
+  const o=objects[selectedIdx];
   gizmo.detach();scene.remove(o.mesh);o.mesh.geometry.dispose();o.mesh.material.dispose();
   objects.splice(selectedIdx,1);selectedIdx=-1;
   document.getElementById('transform-section').style.display='none';updateBoneList();
@@ -1628,26 +1642,69 @@ window.executeAlignment=function(){
   setStatus('✅ Alignment applied');
 };
 
-// ============ UNDO / REDO ============
-window.doUndo=async function(){
-  if(!caseId){setStatus('No case loaded');return;}
-  try{
-    const resp=await fetch(`/api/cases/${caseId}/undo`,{method:'POST'});
-    const data=await resp.json();
-    document.getElementById('history-status').textContent=data.message||'Undo done';
-    setStatus('↩ Undo: '+(data.message||'done'));
-  }catch(e){setStatus('Undo error: '+e.message);}
+// ============ UNDO / REDO (CLIENT-SIDE) ============
+let _undoStack=[];
+let _redoStack=[];
+const UNDO_MAX=50;
+
+function _captureSnapshot(){
+  return objects.map(o=>({
+    name:o.name,
+    position:o.mesh.position.clone(),
+    rotation:o.mesh.rotation.clone(),
+    scale:o.mesh.scale.clone(),
+    uuid:o.mesh.uuid
+  }));
+}
+
+function _applySnapshot(snapshot){
+  snapshot.forEach(s=>{
+    const obj=objects.find(o=>o.mesh.uuid===s.uuid);
+    if(obj){
+      obj.mesh.position.copy(s.position);
+      obj.mesh.rotation.copy(s.rotation);
+      obj.mesh.scale.copy(s.scale);
+    }
+  });
+  if(selectedIdx>=0&&selectedIdx<objects.length){
+    const o=objects[selectedIdx];
+    document.getElementById('tx').value=Math.round(o.mesh.position.x-o.origPos.x);
+    document.getElementById('ty').value=Math.round(o.mesh.position.y-o.origPos.y);
+    document.getElementById('tz').value=Math.round(o.mesh.position.z-o.origPos.z);
+  }
+}
+
+window._captureUndoState=function(action){
+  _undoStack.push({action,snapshot:_captureSnapshot()});
+  if(_undoStack.length>UNDO_MAX)_undoStack.shift();
+  _redoStack=[];
+  _updateHistoryUI();
 };
 
-window.doRedo=async function(){
-  if(!caseId){setStatus('No case loaded');return;}
-  try{
-    const resp=await fetch(`/api/cases/${caseId}/redo`,{method:'POST'});
-    const data=await resp.json();
-    document.getElementById('history-status').textContent=data.message||'Redo done';
-    setStatus('↪ Redo: '+(data.message||'done'));
-  }catch(e){setStatus('Redo error: '+e.message);}
+window.doUndo=function(){
+  if(_undoStack.length===0){setStatus('↩ Nothing to undo');return;}
+  const entry=_undoStack.pop();
+  _redoStack.push({action:entry.action,snapshot:_captureSnapshot()});
+  _applySnapshot(entry.snapshot);
+  setStatus('↩ Undo: '+entry.action);
+  _updateHistoryUI();
 };
+
+window.doRedo=function(){
+  if(_redoStack.length===0){setStatus('↪ Nothing to redo');return;}
+  const entry=_redoStack.pop();
+  _undoStack.push({action:entry.action,snapshot:_captureSnapshot()});
+  _applySnapshot(entry.snapshot);
+  setStatus('↪ Redo: '+entry.action);
+  _updateHistoryUI();
+};
+
+function _updateHistoryUI(){
+  const el=document.getElementById('history-status');
+  if(el){
+    el.textContent=_undoStack.length+' undo / '+_redoStack.length+' redo';
+  }
+}
 
 // ============ GROUPS ============
 let groups=[];
